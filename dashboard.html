@@ -1278,7 +1278,8 @@
     <!-- API Key -->
     <div class="api-notice">
       🔑 <span>FMP API Key:</span>
-      <input type="password" id="apiKeyInput" placeholder="Paste your FMP API key here" />
+      <input type="password" id="apiKeyInput" placeholder="Paste your FMP API key (fallback)" />
+      <input type="password" id="appTokenInput" placeholder="App token (for server)" style="margin-left:4px" />
       <button class="btn" onclick="saveKey()">Save</button>
     </div>
 
@@ -1818,6 +1819,11 @@
 
   // Pre-fill key input if saved
   if (API_KEY) document.getElementById('apiKeyInput').value = API_KEY;
+  const savedToken = localStorage.getItem('app_token');
+  if (savedToken) {
+    const tokenInput = document.getElementById('appTokenInput');
+    if (tokenInput) tokenInput.value = savedToken;
+  }
 
   // ══════════════════════════════════════════
   //  NAV
@@ -1858,10 +1864,17 @@
   //  API KEY
   // ══════════════════════════════════════════
   function saveKey() {
-    const val = document.getElementById('apiKeyInput').value.trim();
-    if (!val) return;
-    API_KEY = val;
-    localStorage.setItem('fmp_key', val);
+    const val   = document.getElementById('apiKeyInput').value.trim();
+    const token = document.getElementById('appTokenInput')?.value.trim();
+    if (val) {
+      API_KEY = val;
+      localStorage.setItem('fmp_key', val);
+    }
+    if (token) {
+      localStorage.setItem('app_token', token);
+      // Reload to reconnect with new token
+      checkServerHealth();
+    }
     refreshAll();
   }
 
@@ -1962,6 +1975,55 @@
   // ══════════════════════════════════════════
   //  FETCH
   // ══════════════════════════════════════════
+  // ══════════════════════════════════════════
+  //  SERVER CONFIG
+  // ══════════════════════════════════════════
+  const SERVER_URL = 'https://marketlens-bt5u.onrender.com';
+  const APP_TOKEN  = localStorage.getItem('app_token') || '';
+  let   serverAvailable = null; // null=unknown, true/false
+
+  // Smart fetch — tries server first, falls back to FMP directly
+  async function smartFetch(serverPath, fmpPath) {
+    // Try server if we think it's available
+    if (serverAvailable !== false && APP_TOKEN) {
+      try {
+        const res = await fetch(`${SERVER_URL}${serverPath}`, {
+          headers: { 'x-app-token': APP_TOKEN },
+          signal: AbortSignal.timeout(5000), // 5s timeout
+        });
+        if (res.ok) {
+          serverAvailable = true;
+          return res.json();
+        }
+      } catch(e) {
+        console.warn('Server unavailable, falling back to FMP:', e.message);
+        serverAvailable = false;
+      }
+    }
+    // Fallback: direct FMP call
+    if (!API_KEY) throw new Error('No API key');
+    const res = await fetch(`${BASE}${fmpPath}&apikey=${API_KEY}`);
+    return res.json();
+  }
+
+  async function checkServerHealth() {
+    try {
+      const res = await fetch(`${SERVER_URL}/api/health`, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        const data = await res.json();
+        serverAvailable = true;
+        console.log('✅ Server connected:', data);
+        // Show server status in header
+        document.getElementById('marketStatusText').textContent = 'SERVER';
+        document.querySelector('.dot').style.background = 'var(--accent)';
+        return true;
+      }
+    } catch {}
+    serverAvailable = false;
+    console.log('ℹ️ Server not available — using direct FMP');
+    return false;
+  }
+
   const BASE = 'https://financialmodelingprep.com/stable';
 
   async function fetchAndRender(sym, forceRefresh = false) {
@@ -2379,13 +2441,34 @@
   }
 
   async function loadScreener() {
-    if (!API_KEY) { alert('Please save your API key first.'); return; }
+    if (!API_KEY && !serverAvailable) { alert('Please save your API key first.'); return; }
     const list = document.getElementById('screenerList');
     list.innerHTML = `<div class="loading-card"><div class="spinner"></div> Loading analyst feed…</div>`;
     try {
+      // Try server first (has accumulated history!)
+      if (serverAvailable && APP_TOKEN) {
+        const res  = await fetch(`${SERVER_URL}/api/screener`, {
+          headers: { 'x-app-token': localStorage.getItem('app_token') || '' }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          screenerData = data;
+          // Pre-populate upside from server enrichment
+          data.forEach(item => {
+            if (item.upsideData?.upside !== undefined) {
+              screenerUpside[item.symbol] = item.upsideData.upside;
+            }
+          });
+          screenerData = data;
+          renderScreener();
+          markVisited();
+          return;
+        }
+      }
+      // Fallback: direct FMP
       const res = await fetch(`${BASE}/grades-latest-news?limit=100&apikey=${API_KEY}`);
       screenerData = await res.json();
-      screenerUpside = {}; // reset enrichment
+      screenerUpside = {};
       renderScreener();
       markVisited();
     } catch(e) {
@@ -4828,20 +4911,21 @@
   updateSlogBadge();
   renderPortfolio();
   initPracticeAccounts();
-  if (API_KEY) {
-    loadOverview();
-    if (watchlist.length > 0) refreshAll();
-    refreshPortfolioPrices();
-    // Background preload signals for portfolio + all practice accounts
-    setTimeout(() => {
-      const portfolioSyms = openPositions.map(p => p.sym);
-      const practiceSyms  = practiceAccounts.flatMap(a => a.open.map(p => p.sym));
-      const allSyms = [...new Set([...portfolioSyms, ...practiceSyms])].filter(s => !watchlist.includes(s));
-      if (allSyms.length > 0) Promise.all(allSyms.map(s => fetchAndRender(s, false)));
-    }, 2000); // wait 2s so main load doesn't compete
-  } else {
-    renderAll();
-  }
+  checkServerHealth().then(() => {
+    if (API_KEY) {
+      loadOverview();
+      if (watchlist.length > 0) refreshAll();
+      refreshPortfolioPrices();
+      setTimeout(() => {
+        const portfolioSyms = openPositions.map(p => p.sym);
+        const practiceSyms  = practiceAccounts.flatMap(a => a.open.map(p => p.sym));
+        const allSyms = [...new Set([...portfolioSyms, ...practiceSyms])].filter(s => !watchlist.includes(s));
+        if (allSyms.length > 0) Promise.all(allSyms.map(s => fetchAndRender(s, false)));
+      }, 2000);
+    } else {
+      renderAll();
+    }
+  });
 </script>
 </body>
 </html>
