@@ -20,6 +20,28 @@ app.use(express.json());
 // Serve static files (dashboard.html)
 app.use(express.static(path.join(__dirname, '..')));
 
+// Serve login page at root
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'login.html'));
+});
+
+// ── Login endpoint ────────────────────────────────────────────────
+app.post('/api/login', (req, res) => {
+  const { password } = req.body;
+  const correctPwd   = process.env.APP_PASSWORD;
+
+  if (!correctPwd) {
+    // No password set — allow access (dev mode)
+    return res.json({ token: process.env.APP_TOKEN || 'dev' });
+  }
+
+  if (password === correctPwd) {
+    res.json({ token: process.env.APP_TOKEN });
+  } else {
+    res.status(401).json({ error: 'Invalid password' });
+  }
+});
+
 // ── Auth middleware ───────────────────────────────────────────────
 // Simple token auth — set APP_TOKEN in environment
 function auth(req, res, next) {

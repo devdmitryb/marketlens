@@ -1218,6 +1218,8 @@
       <div class="dot"></div>
       <span id="marketStatusText">LIVE</span>
     </div>
+    <button class="btn secondary" onclick="logout()"
+      style="font-size:0.72rem;padding:5px 12px;margin-left:8px">Sign Out</button>
   </div>
 </header>
 
@@ -1863,6 +1865,11 @@
   // ══════════════════════════════════════════
   //  API KEY
   // ══════════════════════════════════════════
+  function logout() {
+    sessionStorage.removeItem('ml_token');
+    window.location.href = '/login.html';
+  }
+
   function saveKey() {
     const val   = document.getElementById('apiKeyInput').value.trim();
     const token = document.getElementById('appTokenInput')?.value.trim();
@@ -1979,7 +1986,8 @@
   //  SERVER CONFIG
   // ══════════════════════════════════════════
   const SERVER_URL = 'https://marketlens-bt5u.onrender.com';
-  const APP_TOKEN  = localStorage.getItem('app_token') || '';
+  // Get token from session (set by login page) or localStorage (fallback)
+  const APP_TOKEN  = sessionStorage.getItem('ml_token') || localStorage.getItem('app_token') || '';
   let   serverAvailable = null; // null=unknown, true/false
 
   // Smart fetch — tries server first, falls back to FMP directly
