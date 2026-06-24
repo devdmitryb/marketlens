@@ -2700,14 +2700,22 @@
     if (!history) {
       wrap.innerHTML = `<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:40px 0">Loading…</div>`;
       try {
-        const from = new Date(); from.setDate(from.getDate() - days);
-        const fromStr = from.toISOString().slice(0,10);
-        const res  = await fetch(`${BASE}/historical-price-eod/full?symbol=${sym}&from=${fromStr}&apikey=${API_KEY}`);
-        const data = await res.json();
-        history = (data?.historical || data || []).reverse(); // oldest first
+        const from    = new Date(); from.setDate(from.getDate() - days);
+        const fromStr = from.toISOString().slice(0, 10);
+        let data;
+        if (serverAvailable && APP_TOKEN) {
+          const res = await fetch(`${SERVER_URL}/api/history/${sym}?from=${fromStr}`, {
+            headers: { 'x-app-token': APP_TOKEN }
+          });
+          data = await res.json();
+        } else {
+          const res = await fetch(`${BASE}/historical-price-eod/full?symbol=${sym}&from=${fromStr}&apikey=${API_KEY}`);
+          data = await res.json();
+        }
+        history = Array.isArray(data) ? [...data].reverse() : (data?.historical || []).reverse();
         if (history.length) {
           chartCache[cacheKey] = history;
-          cacheSet(`chart_${cacheKey}`, history); // persist to localStorage
+          cacheSet(`chart_${cacheKey}`, history);
         }
       } catch(e) {
         wrap.innerHTML = `<div style="color:var(--danger);font-size:0.78rem;text-align:center;padding:40px 0">Chart unavailable</div>`;
@@ -2880,17 +2888,33 @@
 
   async function loadDrawerData(sym) {
     try {
-      const [quoteRes, gradesRes, targetRes, earningsRes] = await Promise.all([
-        fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-        fetch(`${BASE}/grades?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-        fetch(`${BASE}/price-target-consensus?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-        fetch(`${BASE}/earnings?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()).catch(() => []),
-      ]);
+      let quote, grades, target, earnings;
 
-      const quote    = Array.isArray(quoteRes)    ? quoteRes[0]    : null;
-      const target   = Array.isArray(targetRes)   ? targetRes[0]   : null;
-      const grades   = Array.isArray(gradesRes)   ? gradesRes      : [];
-      const earnings = Array.isArray(earningsRes) ? earningsRes    : [];
+      if (serverAvailable && APP_TOKEN) {
+        const headers = { 'x-app-token': APP_TOKEN };
+        [quote, grades, target, earnings] = await Promise.all([
+          fetch(`${SERVER_URL}/api/quote/${sym}`,    { headers }).then(r => r.json()),
+          fetch(`${SERVER_URL}/api/grades/${sym}`,   { headers }).then(r => r.json()),
+          fetch(`${SERVER_URL}/api/target/${sym}`,   { headers }).then(r => r.json()),
+          fetch(`${SERVER_URL}/api/earnings/${sym}`, { headers }).then(r => r.json()).catch(() => []),
+        ]);
+        // Normalize
+        if (Array.isArray(quote))    quote    = quote[0]   || null;
+        if (Array.isArray(target))   target   = target[0]  || null;
+        if (!Array.isArray(grades))  grades   = [];
+        if (!Array.isArray(earnings)) earnings = [];
+      } else {
+        const [quoteRes, gradesRes, targetRes, earningsRes] = await Promise.all([
+          fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
+          fetch(`${BASE}/grades?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
+          fetch(`${BASE}/price-target-consensus?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
+          fetch(`${BASE}/earnings?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()).catch(() => []),
+        ]);
+        quote    = Array.isArray(quoteRes)    ? quoteRes[0]    : null;
+        target   = Array.isArray(targetRes)   ? targetRes[0]   : null;
+        grades   = Array.isArray(gradesRes)   ? gradesRes      : [];
+        earnings = Array.isArray(earningsRes) ? earningsRes    : [];
+      }
 
       // Next earnings = first where epsActual is null (future)
       const today = new Date();
