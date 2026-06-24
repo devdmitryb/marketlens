@@ -27,10 +27,14 @@ async function collectScreenerFeed() {
     const newEntries   = fresh.filter(e => !existingUrls.has(e.newsURL));
 
     if (newEntries.length > 0) {
-      // Prepend new, keep max 500 entries
-      const merged = [...newEntries, ...existing].slice(0, 500);
-      store.write('screener', merged);
-      console.log(`[cron] Screener: +${newEntries.length} new entries (total: ${merged.length})`);
+      // Keep entries newer than 90 days
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 90);
+      const filtered = [...newEntries, ...existing].filter(e =>
+        new Date(e.publishedDate) >= cutoff
+      );
+      store.write('screener', filtered);
+      console.log(`[cron] Screener: +${newEntries.length} new, total: ${filtered.length} (90d window)`);
     } else {
       console.log('[cron] Screener: no new entries');
     }
