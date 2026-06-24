@@ -2972,9 +2972,18 @@
       const historicalPrices = {};
       await Promise.all(uniqueDates.map(async date => {
         try {
-          const r = await fetch(`${BASE}/historical-price-eod/full?symbol=${sym}&from=${date}&to=${date}&apikey=${API_KEY}`);
-          const d = await r.json();
-          const arr = d?.historical || d;
+          let arr;
+          if (serverAvailable && APP_TOKEN) {
+            const r = await fetch(`${SERVER_URL}/api/history/${sym}?from=${date}`, {
+              headers: { 'x-app-token': APP_TOKEN }
+            });
+            const d = await r.json();
+            arr = Array.isArray(d) ? d : d?.historical;
+          } else {
+            const r = await fetch(`${BASE}/historical-price-eod/full?symbol=${sym}&from=${date}&to=${date}&apikey=${API_KEY}`);
+            const d = await r.json();
+            arr = d?.historical || d;
+          }
           if (Array.isArray(arr) && arr[0]?.close) {
             historicalPrices[date] = arr[0].close;
           }
@@ -3349,29 +3358,40 @@
 
   // ── FETCH LIVE PRICES FOR PORTFOLIO ──
   async function fetchPortfolioPrice(sym) {
-    if (!API_KEY || livePortfolioPrices[sym]) return;
+    if (livePortfolioPrices[sym]) return;
+    if (!API_KEY && !serverAvailable) return;
     try {
-      const res = await fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`);
-      const data = await res.json();
-      if (Array.isArray(data) && data[0]?.price) {
-        livePortfolioPrices[sym] = data[0].price;
-        renderPortfolio();
+      let price;
+      if (serverAvailable && APP_TOKEN) {
+        const res  = await fetch(`${SERVER_URL}/api/quote/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
+        const data = await res.json();
+        price = (Array.isArray(data) ? data[0] : data)?.price;
+      } else {
+        const res  = await fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`);
+        const data = await res.json();
+        price = Array.isArray(data) ? data[0]?.price : data?.price;
       }
+      if (price) { livePortfolioPrices[sym] = price; renderPortfolio(); }
     } catch {}
   }
 
-  let portfolioEarnings = {}; // sym -> next earnings date
+  let portfolioEarnings = {};
 
   async function fetchPortfolioEarnings(sym) {
     if (portfolioEarnings[sym] !== undefined) return;
     try {
-      const res  = await fetch(`${BASE}/earnings?symbol=${sym}&apikey=${API_KEY}`);
-      const data = await res.json();
+      let data;
+      if (serverAvailable && APP_TOKEN) {
+        const res = await fetch(`${SERVER_URL}/api/earnings/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
+        data = await res.json();
+      } else {
+        const res = await fetch(`${BASE}/earnings?symbol=${sym}&apikey=${API_KEY}`);
+        data = await res.json();
+      }
       const today = new Date();
-      const next  = Array.isArray(data)
-        ? data.find(e => e.epsActual === null && new Date(e.date) >= today)
+      portfolioEarnings[sym] = Array.isArray(data)
+        ? data.find(e => e.epsActual === null && new Date(e.date) >= today) || null
         : null;
-      portfolioEarnings[sym] = next || null;
     } catch { portfolioEarnings[sym] = null; }
   }
 
@@ -4073,9 +4093,7 @@
     // Fetch live price if not provided
     if (!price) {
       try {
-        const res  = await fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`);
-        const data = await res.json();
-        price = data[0]?.price;
+        price = await fetchLivePrice(sym);
         if (!price) { alert('Could not fetch price. Please enter manually.'); return; }
         livePracticePrices[sym] = price;
       } catch { alert('Could not fetch price. Please enter manually.'); return; }
@@ -4140,9 +4158,7 @@
 
     if (!exitPrice) {
       try {
-        const res  = await fetch(`${BASE}/quote?symbol=${pos.sym}&apikey=${API_KEY}`);
-        const data = await res.json();
-        exitPrice  = data[0]?.price;
+        exitPrice = await fetchLivePrice(pos.sym);
         if (!exitPrice) { alert('Could not fetch price. Enter manually.'); return; }
       } catch { alert('Could not fetch price. Enter manually.'); return; }
     }
@@ -4172,12 +4188,23 @@
   }
 
   // ── PRICES ──
+  async function fetchLivePrice(sym) {
+    if (serverAvailable && APP_TOKEN) {
+      const res  = await fetch(`${SERVER_URL}/api/quote/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
+      const data = await res.json();
+      return (Array.isArray(data) ? data[0] : data)?.price || null;
+    }
+    if (!API_KEY) return null;
+    const res  = await fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`);
+    const data = await res.json();
+    return Array.isArray(data) ? data[0]?.price : data?.price || null;
+  }
+
   async function fetchPracticePrice(sym) {
     if (livePracticePrices[sym]) return;
     try {
-      const res  = await fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`);
-      const data = await res.json();
-      if (data[0]?.price) { livePracticePrices[sym] = data[0].price; renderPractice(); }
+      const price = await fetchLivePrice(sym);
+      if (price) { livePracticePrices[sym] = price; renderPractice(); }
     } catch {}
   }
 
