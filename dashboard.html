@@ -2512,26 +2512,33 @@
   }
 
   async function enrichAll() {
-    if (!API_KEY) return;
+    if (!API_KEY && !serverAvailable) return;
     const btn = document.getElementById('enrichBtn');
     btn.textContent = '⏳ Loading…';
     btn.disabled = true;
 
-    // Unique symbols only
     const symbols = [...new Set((Array.isArray(screenerData) ? screenerData : []).map(r => r.symbol))];
 
-    // Fetch in parallel batches of 5 to avoid hammering API
     const batchSize = 5;
     for (let i = 0; i < symbols.length; i += batchSize) {
       const batch = symbols.slice(i, i + batchSize);
       await Promise.all(batch.map(async sym => {
         try {
-          const [quoteRes, targetRes] = await Promise.all([
-            fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-            fetch(`${BASE}/price-target-consensus?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-          ]);
-          const quote  = Array.isArray(quoteRes)  ? quoteRes[0]  : null;
-          const target = Array.isArray(targetRes) ? targetRes[0] : null;
+          let quote, target;
+          if (serverAvailable && APP_TOKEN) {
+            const headers = { 'x-app-token': APP_TOKEN };
+            [quote, target] = await Promise.all([
+              fetch(`${SERVER_URL}/api/quote/${sym}`,  { headers }).then(r => r.json()),
+              fetch(`${SERVER_URL}/api/target/${sym}`, { headers }).then(r => r.json()),
+            ]);
+          } else {
+            const [qr, tr] = await Promise.all([
+              fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
+              fetch(`${BASE}/price-target-consensus?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
+            ]);
+            quote  = Array.isArray(qr) ? qr[0] : qr;
+            target = Array.isArray(tr) ? tr[0] : tr;
+          }
           if (quote?.price && target?.targetConsensus) {
             screenerUpside[sym] = ((target.targetConsensus - quote.price) / quote.price * 100);
           } else {
@@ -2539,7 +2546,6 @@
           }
         } catch { screenerUpside[sym] = null; }
       }));
-      // Re-render after each batch so user sees progress
       renderScreener();
     }
 

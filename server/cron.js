@@ -173,28 +173,25 @@ function logSignalChange(sym, newSignal, oldSignal, upside) {
 
 // ── SCHEDULE ─────────────────────────────────────────────────────
 function startCronJobs() {
-  // Screener: every 2 hours during market hours (Mon-Fri 9:30-16:00 ET)
+  // Every 2 hours — collect screener + enrich new symbols + refresh signals
   cron.schedule('0 */2 * * 1-5', async () => {
     await collectScreenerFeed();
-    if (isMarketOpen()) await refreshWatchedSymbols();
+    await enrichScreenerUpside(); // enrich after every collection
+    await refreshWatchedSymbols();
   }, { timezone: 'America/New_York' });
 
-  // Also refresh outside market hours every 6 hours
-  cron.schedule('0 */6 * * *', async () => {
-    if (!isMarketOpen()) {
-      await collectScreenerFeed();
-      await refreshWatchedSymbols();
-    }
+  // Also run every 6 hours on weekends
+  cron.schedule('0 */6 * * 0,6', async () => {
+    await collectScreenerFeed();
+    await enrichScreenerUpside();
   });
-
-  // Enrich screener upside once per day at 2am ET
-  cron.schedule('0 2 * * *', enrichScreenerUpside, { timezone: 'America/New_York' });
 
   console.log('[cron] Jobs scheduled ✅');
 
   // Run immediately on startup
   setTimeout(async () => {
     await collectScreenerFeed();
+    await enrichScreenerUpside();
     await refreshWatchedSymbols();
   }, 3000);
 }
