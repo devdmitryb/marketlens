@@ -1557,6 +1557,7 @@
         <button class="ptab" onclick="switchPracticeTab('trades')">Trade Log</button>
       </div>
       <button class="btn secondary" onclick="refreshPracticePrices()" style="font-size:0.8rem">↻ Refresh Prices</button>
+      <button class="btn secondary" onclick="refreshPracticeSignals()" style="font-size:0.8rem">↻ Refresh Signals</button>
     </div>
 
     <!-- Open positions -->
@@ -1841,13 +1842,9 @@
     }
     if (name === 'practice') {
       initPracticeAccounts();
-      if (API_KEY) {
+      if (API_KEY || serverAvailable) {
         refreshPracticePrices();
-        const acc = getCurrentAccount();
-        if (acc) {
-          const syms = [...new Set(acc.open.map(p => p.sym))].filter(s => !stockData[s]);
-          Promise.all(syms.map(s => fetchAndRender(s, false)));
-        }
+        refreshPracticeSignals();
       }
     }
     if (name === 'portfolio' && API_KEY && openPositions.length > 0) {
@@ -4206,6 +4203,14 @@
       const price = await fetchLivePrice(sym);
       if (price) { livePracticePrices[sym] = price; renderPractice(); }
     } catch {}
+  }
+
+  async function refreshPracticeSignals() {
+    const syms = [...new Set(
+      practiceAccounts.flatMap(a => a.open.map(p => p.sym))
+    )];
+    await Promise.all(syms.map(s => fetchAndRender(s, false)));
+    renderPractice();
   }
 
   async function refreshPracticePrices() {
