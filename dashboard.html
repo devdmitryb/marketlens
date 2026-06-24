@@ -3626,7 +3626,7 @@
   }
 
   async function loadOverview(forceRefresh = false) {
-    if (!API_KEY) return;
+    if (!API_KEY && !serverAvailable) return;
     updateMarketBanner();
 
     const allSyms = [...OVERVIEW_SYMBOLS.indices, ...OVERVIEW_SYMBOLS.sectors, ...OVERVIEW_SYMBOLS.commodities];
@@ -3641,16 +3641,20 @@
       }
     }
 
-    // Fetch each symbol separately
-    const results = await Promise.all(
-      allSyms.map(sym =>
-        fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`)
-          .then(r => r.json())
-          .then(d => (Array.isArray(d) && d[0]) ? d[0] : null)
-          .catch(() => null)
-      )
-    );
+    // Fetch via server or direct FMP
+    const fetchQuote = async (sym) => {
+      if (serverAvailable && APP_TOKEN) {
+        const res = await fetch(`${SERVER_URL}/api/quote/${sym}`, {
+          headers: { 'x-app-token': APP_TOKEN }
+        });
+        return res.ok ? res.json() : null;
+      }
+      const res = await fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`);
+      const d   = await res.json();
+      return Array.isArray(d) ? d[0] : null;
+    };
 
+    const results  = await Promise.all(allSyms.map(sym => fetchQuote(sym).catch(() => null)));
     const bySymbol = {};
     allSyms.forEach((sym, i) => { if (results[i]) bySymbol[sym] = results[i]; });
     cacheSet('overview_data', bySymbol);
