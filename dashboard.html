@@ -2087,6 +2087,11 @@
           fetch(`${SERVER_URL}/api/target/${sym}`,  { headers }).then(r => r.json()),
           fetch(`${SERVER_URL}/api/history/${sym}?from=${from60Str}`, { headers }).then(r => r.json()),
         ]);
+        // Normalize — server returns objects directly, FMP returns arrays
+        if (Array.isArray(quote))   quote   = quote[0]   || null;
+        if (Array.isArray(target))  target  = target[0]  || null;
+        if (!Array.isArray(grades)) grades  = grades ? [grades] : [];
+        if (!Array.isArray(history)) history = history?.historical || [];
       } else {
         // Direct FMP fallback
         if (!API_KEY) { showError(sym, 'No connection'); return; }
