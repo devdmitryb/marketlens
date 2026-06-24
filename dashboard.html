@@ -1932,6 +1932,14 @@
 
   function saveWatchlist() {
     localStorage.setItem('watchlist', JSON.stringify(watchlist));
+    // Sync to server if connected
+    if (serverAvailable && APP_TOKEN) {
+      fetch(`${SERVER_URL}/api/watchlist`, {
+        method:  'POST',
+        headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ symbols: watchlist }),
+      }).catch(e => console.warn('Watchlist sync failed:', e.message));
+    }
   }
 
   // ══════════════════════════════════════════
@@ -2472,12 +2480,11 @@
     try {
       // Try server first (has accumulated history!)
       if (serverAvailable && APP_TOKEN) {
-        const res  = await fetch(`${SERVER_URL}/api/screener`, {
-          headers: { 'x-app-token': localStorage.getItem('app_token') || '' }
+        const res = await fetch(`${SERVER_URL}/api/screener`, {
+          headers: { 'x-app-token': APP_TOKEN }
         });
         if (res.ok) {
           const data = await res.json();
-          screenerData = data;
           // Pre-populate upside from server enrichment
           data.forEach(item => {
             if (item.upsideData?.upside !== undefined) {
@@ -2488,9 +2495,12 @@
           renderScreener();
           markVisited();
           return;
+        } else {
+          console.warn('Server screener failed:', res.status);
         }
       }
       // Fallback: direct FMP
+      if (!API_KEY) { list.innerHTML = `<div class="loading-card">⚠️ No API key or server connection</div>`; return; }
       const res = await fetch(`${BASE}/grades-latest-news?limit=100&apikey=${API_KEY}`);
       screenerData = await res.json();
       screenerUpside = {};
@@ -4936,7 +4946,22 @@
   updateSlogBadge();
   renderPortfolio();
   initPracticeAccounts();
-  checkServerHealth().then(() => {
+  checkServerHealth().then(async (connected) => {
+    // If server connected — load watchlist from server (cross-device sync!)
+    if (connected && APP_TOKEN) {
+      try {
+        const res = await fetch(`${SERVER_URL}/api/watchlist`, {
+          headers: { 'x-app-token': APP_TOKEN }
+        });
+        if (res.ok) {
+          const serverWatchlist = await res.json();
+          if (serverWatchlist.length > 0) {
+            watchlist = serverWatchlist;
+            localStorage.setItem('watchlist', JSON.stringify(watchlist));
+          }
+        }
+      } catch(e) { console.warn('Could not load watchlist from server:', e.message); }
+    }
     if (API_KEY) {
       loadOverview();
       if (watchlist.length > 0) refreshAll();
