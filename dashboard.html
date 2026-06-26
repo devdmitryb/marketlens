@@ -2631,8 +2631,6 @@
           <div class="screener-sym">
             ${isNew ? '<span style="color:var(--accent2);font-size:0.6rem;font-weight:700;letter-spacing:0.08em;display:block">NEW</span>' : ''}
             ${item.symbol}
-            ${openPositions.some(p => p.sym === item.symbol) ? '<span style="font-size:0.58rem;font-weight:700;color:var(--accent2);display:block;letter-spacing:0.06em">💼 HOLDING</span>' : ''}
-            ${isInAnyPracticeAccount(item.symbol) ? '<span style="font-size:0.58rem;font-weight:700;color:var(--accent);display:block;letter-spacing:0.06em">🎮 PRACTICE</span>' : ''}
           </div>
           <div class="screener-date">${date}</div>
         </div>
@@ -2645,12 +2643,16 @@
         <div class="grade-change">${gradeChange}</div>
         <div><span class="action-badge ${actionClass}">${actionLabel}</span></div>
         <div>${upsideCell}</div>
-        <button class="add-watch-btn ${inWatch ? 'added' : ''}"
-          id="watch-btn-${i}"
-          onclick="addFromScreener('${item.symbol}', ${i})"
-          ${inWatch ? 'disabled' : ''}>
-          ${inWatch ? '✓ Watching' : '+ Watch'}
-        </button>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+          <button class="add-watch-btn ${inWatch ? 'added' : ''}"
+            id="watch-btn-${i}"
+            onclick="addFromScreener('${item.symbol}', ${i})"
+            ${inWatch ? 'disabled' : ''}>
+            ${inWatch ? '✓ Watching' : '+ Watch'}
+          </button>
+          ${openPositions.some(p => p.sym === item.symbol) ? '<span style="font-size:0.58rem;font-weight:700;color:var(--accent2);letter-spacing:0.06em">💼 HOLDING</span>' : ''}
+          ${isInAnyPracticeAccount(item.symbol) ? '<span style="font-size:0.58rem;font-weight:700;color:var(--accent);letter-spacing:0.06em">🎮 PRACTICE</span>' : ''}
+        </div>
       `;
       row.style.cursor = 'pointer';
       row.onclick = (e) => {
