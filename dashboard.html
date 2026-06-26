@@ -4402,11 +4402,32 @@
         from.setFullYear(from.getFullYear() - years);
         const fromStr = from.toISOString().slice(0, 10);
 
+        const headers = serverAvailable && APP_TOKEN ? { 'x-app-token': APP_TOKEN } : null;
+
+        const fetchS = async (s) => {
+          if (headers) {
+            const res = await fetch(`${SERVER_URL}/api/history/${s}?from=${fromStr}`, { headers });
+            return res.json();
+          }
+          return fetch(`${BASE}/historical-price-eod/full?symbol=${s}&from=${fromStr}&apikey=${API_KEY}`).then(r => r.json());
+        };
+        const fetchG = async (s) => {
+          if (headers) {
+            const res = await fetch(`${SERVER_URL}/api/grades/${s}`, { headers });
+            return res.json();
+          }
+          return fetch(`${BASE}/grades?symbol=${s}&apikey=${API_KEY}`).then(r => r.json());
+        };
+        const fetchT = async (s) => {
+          if (headers) {
+            const res = await fetch(`${SERVER_URL}/api/target/${s}`, { headers });
+            return res.json();
+          }
+          return fetch(`${BASE}/price-target-consensus?symbol=${s}&apikey=${API_KEY}`).then(r => r.json());
+        };
+
         const [histRes, xbiRes, gradesRes, targetRes] = await Promise.all([
-          fetch(`${BASE}/historical-price-eod/full?symbol=${sym}&from=${fromStr}&apikey=${API_KEY}`).then(r => r.json()),
-          fetch(`${BASE}/historical-price-eod/full?symbol=XBI&from=${fromStr}&apikey=${API_KEY}`).then(r => r.json()),
-          fetch(`${BASE}/grades?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-          fetch(`${BASE}/price-target-consensus?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
+          fetchS(sym), fetchS('XBI'), fetchG(sym), fetchT(sym),
         ]);
 
         const parseHist = (res) => Array.isArray(res) ? [...res].reverse()
@@ -4415,7 +4436,7 @@
         const history = parseHist(histRes);
         const xbiHist = parseHist(xbiRes);
         const grades  = Array.isArray(gradesRes) ? gradesRes : [];
-        const target  = Array.isArray(targetRes) ? targetRes[0] : null;
+        const target  = Array.isArray(targetRes) ? targetRes[0] : (targetRes && !Array.isArray(targetRes) ? targetRes : null);
 
         if (history.length < 30) {
           updateScanRow(sym, null, null, 'No data');
