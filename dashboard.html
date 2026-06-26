@@ -1865,6 +1865,7 @@
   // ══════════════════════════════════════════
   function logout() {
     sessionStorage.removeItem('ml_token');
+    localStorage.removeItem('ml_token');
     window.location.href = '/login.html';
   }
 
@@ -1993,7 +1994,7 @@
   // ══════════════════════════════════════════
   const SERVER_URL = 'https://marketlens-bt5u.onrender.com';
   // Get token from session (set by login page) or localStorage (fallback)
-  const APP_TOKEN  = sessionStorage.getItem('ml_token') || localStorage.getItem('app_token') || '';
+  const APP_TOKEN = sessionStorage.getItem('ml_token') || localStorage.getItem('ml_token') || localStorage.getItem('app_token') || '';
   let   serverAvailable = null; // null=unknown, true/false
 
   // Smart fetch — tries server first, falls back to FMP directly
@@ -4512,11 +4513,17 @@
   function initBacktestSymbolSelector() {
     const sel = document.getElementById('bt-symbol');
     if (!sel) return;
+    const practiceSyms = practiceAccounts.flatMap(a => [
+      ...a.open.map(p => p.sym),
+      ...a.closed.map(p => p.sym),
+    ]);
     const allSyms = [...new Set([
       ...watchlist,
       ...openPositions.map(p => p.sym),
+      ...practiceSyms,
     ])].sort();
-    sel.innerHTML = allSyms.map(s => `<option value="${s}">${s}</option>`).join('');
+    sel.innerHTML = `<option value="">Select…</option>` +
+      allSyms.map(s => `<option value="${s}">${s}</option>`).join('');
   }
 
   async function runBacktest() {
@@ -4524,12 +4531,11 @@
     const symSelect = document.getElementById('bt-symbol');
     const sym = customSym || symSelect.value;
     if (!sym) { alert('Please select or type a symbol.'); return; }
+    if (!API_KEY && !serverAvailable) { alert('No server connection or API key.'); return; }
     const years   = parseInt(document.getElementById('bt-period').value);
     const capital = parseFloat(document.getElementById('bt-capital').value) || 200;
     const btn     = document.getElementById('bt-run-btn');
     const status  = document.getElementById('bt-status');
-
-    if (!sym || !API_KEY) return;
 
     btn.disabled = true; btn.textContent = '⏳ Loading…';
     status.textContent = 'Fetching historical data…';
@@ -4539,13 +4545,34 @@
       from.setFullYear(from.getFullYear() - years);
       const fromStr = from.toISOString().slice(0, 10);
 
-      // Fetch price history + XBI + SPY for comparison
+      // Fetch via server or direct FMP
+      const fetchHist = async (s) => {
+        if (serverAvailable && APP_TOKEN) {
+          const res = await fetch(`${SERVER_URL}/api/history/${s}?from=${fromStr}`, {
+            headers: { 'x-app-token': APP_TOKEN }
+          });
+          return res.json();
+        }
+        return fetch(`${BASE}/historical-price-eod/full?symbol=${s}&from=${fromStr}&apikey=${API_KEY}`).then(r => r.json());
+      };
+      const fetchGrades = async (s) => {
+        if (serverAvailable && APP_TOKEN) {
+          const res = await fetch(`${SERVER_URL}/api/grades/${s}`, { headers: { 'x-app-token': APP_TOKEN } });
+          return res.json();
+        }
+        return fetch(`${BASE}/grades?symbol=${s}&apikey=${API_KEY}`).then(r => r.json());
+      };
+      const fetchTarget = async (s) => {
+        if (serverAvailable && APP_TOKEN) {
+          const res = await fetch(`${SERVER_URL}/api/target/${s}`, { headers: { 'x-app-token': APP_TOKEN } });
+          return res.json();
+        }
+        return fetch(`${BASE}/price-target-consensus?symbol=${s}&apikey=${API_KEY}`).then(r => r.json());
+      };
+
       const [histRes, xbiRes, spyRes, gradesRes, targetRes] = await Promise.all([
-        fetch(`${BASE}/historical-price-eod/full?symbol=${sym}&from=${fromStr}&apikey=${API_KEY}`).then(r => r.json()),
-        fetch(`${BASE}/historical-price-eod/full?symbol=XBI&from=${fromStr}&apikey=${API_KEY}`).then(r => r.json()),
-        fetch(`${BASE}/historical-price-eod/full?symbol=SPY&from=${fromStr}&apikey=${API_KEY}`).then(r => r.json()),
-        fetch(`${BASE}/grades?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-        fetch(`${BASE}/price-target-consensus?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
+        fetchHist(sym), fetchHist('XBI'), fetchHist('SPY'),
+        fetchGrades(sym), fetchTarget(sym),
       ]);
 
       const parseHist = (res) => {
