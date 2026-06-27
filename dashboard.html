@@ -1105,7 +1105,10 @@
       #bt-symbol-custom { width: 100% !important; }
       #bt-run-btn, #bt-scan-btn { width: 100%; }
 
-      /* ── BACKTEST RESULTS ── */
+      /* ── API NOTICE ── */
+      .api-notice { flex-wrap: wrap; gap: 6px; }
+      .api-notice input { width: 100%; max-width: 100%; }
+    }
       .bt-results { grid-template-columns: 1fr 1fr !important; }
       .bt-comparison { grid-template-columns: 1fr !important; }
       .bt-trade-header { display: none; }
@@ -1115,10 +1118,60 @@
         padding: 8px 10px !important;
       }
 
-      /* ── API NOTICE ── */
-      .api-notice { flex-wrap: wrap; gap: 6px; }
-      .api-notice input { width: 100%; max-width: 100%; }
-    }
+      /* ── FIX OVERFLOW — override all fixed-width grids ── */
+      /* Screener */
+      .screener-header { display: none; }
+      .screener-row {
+        display: grid !important;
+        grid-template-columns: 1fr auto !important;
+        grid-template-rows: auto auto !important;
+        gap: 6px !important;
+        padding: 10px 8px !important;
+      }
+      .screener-row > *:not(:nth-child(1)):not(:nth-child(2)):not(:nth-child(7)):not(:nth-child(8)) { display: none !important; }
+
+      /* Closed positions */
+      .closed-header { display: none !important; }
+      .closed-row {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr 1fr !important;
+        gap: 6px !important;
+        padding: 10px !important;
+      }
+      .closed-row > *:nth-child(n+4) { display: none !important; }
+
+      /* Signal log */
+      .slog-header { display: none !important; }
+      .slog-row {
+        display: grid !important;
+        grid-template-columns: 1fr auto !important;
+        grid-template-rows: auto auto !important;
+        gap: 4px !important;
+        padding: 10px 8px !important;
+      }
+      .slog-row > *:not(:nth-child(1)):not(:nth-child(2)):not(:nth-child(3)):not(:nth-child(4)) { display: none !important; }
+
+      /* Overview */
+      .ov-grid { grid-template-columns: 1fr 1fr !important; }
+      .ov-card { padding: 14px 12px !important; }
+
+      /* Portfolio summary */
+      .portfolio-summary { grid-template-columns: 1fr 1fr !important; }
+
+      /* Modal */
+      .modal { width: 95vw !important; padding: 20px 16px !important; }
+      .form-row { grid-template-columns: 1fr !important; }
+
+      /* Drawer */
+      .drawer-body { padding: 16px !important; }
+
+      /* Overview sector grid */
+      .sector-grid { grid-template-columns: 1fr 1fr !important; }
+
+      /* Backtest scan table */
+      #bt-scan-table { font-size: 0.7rem; }
+      #bt-scan-table th:nth-child(n+5),
+      #bt-scan-table td:nth-child(n+5) { display: none !important; }
     /* ── CHART ── */
     .chart-periods {
       display: flex;
