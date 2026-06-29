@@ -194,7 +194,31 @@ app.post('/api/watchlist', auth, (req, res) => {
   res.json({ ok: true, symbols });
 });
 
-// Trigger manual refresh (for testing)
+// Practice accounts — sync across devices
+app.get('/api/practice', auth, (req, res) => {
+  res.json(store.read('practice', []));
+});
+
+app.post('/api/practice', auth, (req, res) => {
+  const { accounts } = req.body;
+  if (!Array.isArray(accounts)) return res.status(400).json({ error: 'accounts must be array' });
+  store.write('practice', accounts);
+  res.json({ ok: true });
+});
+
+// Portfolio — sync across devices
+app.get('/api/portfolio', auth, (req, res) => {
+  res.json(store.read('portfolio', { open: [], closed: [] }));
+});
+
+app.post('/api/portfolio', auth, (req, res) => {
+  const data = req.body;
+  if (!data) return res.status(400).json({ error: 'No data' });
+  store.write('portfolio', data);
+  res.json({ ok: true });
+});
+
+// ── Trigger manual refresh ────────────────────────────────────────
 app.post('/api/refresh', auth, async (req, res) => {
   const { collectScreenerFeed, refreshWatchedSymbols } = require('./cron');
   res.json({ ok: true, message: 'Refresh started' });

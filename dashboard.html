@@ -3422,6 +3422,14 @@
   function savePortfolio() {
     localStorage.setItem('portfolio_open',   JSON.stringify(openPositions));
     localStorage.setItem('portfolio_closed', JSON.stringify(closedPositions));
+    // Sync to server
+    if (serverAvailable && APP_TOKEN) {
+      fetch(`${SERVER_URL}/api/portfolio`, {
+        method: 'POST',
+        headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ open: openPositions, closed: closedPositions }),
+      }).catch(e => console.warn('Portfolio sync failed:', e.message));
+    }
   }
 
   async function refreshPortfolioSignals() {
@@ -4084,6 +4092,14 @@
 
   function savePracticeAccounts() {
     localStorage.setItem('practice_accounts', JSON.stringify(practiceAccounts));
+    // Sync to server
+    if (serverAvailable && APP_TOKEN) {
+      fetch(`${SERVER_URL}/api/practice`, {
+        method: 'POST',
+        headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accounts: practiceAccounts }),
+      }).catch(e => console.warn('Practice sync failed:', e.message));
+    }
   }
 
   function isInAnyPracticeAccount(sym) {
@@ -5231,20 +5247,39 @@
   renderPortfolio();
   initPracticeAccounts();
   checkServerHealth().then(async (connected) => {
-    // If server connected — load watchlist from server (cross-device sync!)
+    // Load watchlist from server
     if (connected && APP_TOKEN) {
       try {
-        const res = await fetch(`${SERVER_URL}/api/watchlist`, {
-          headers: { 'x-app-token': APP_TOKEN }
-        });
-        if (res.ok) {
-          const serverWatchlist = await res.json();
+        const [wlRes, prRes] = await Promise.all([
+          fetch(`${SERVER_URL}/api/watchlist`, { headers: { 'x-app-token': APP_TOKEN } }),
+          fetch(`${SERVER_URL}/api/practice`,  { headers: { 'x-app-token': APP_TOKEN } }),
+        ]);
+        if (wlRes.ok) {
+          const serverWatchlist = await wlRes.json();
           if (serverWatchlist.length > 0) {
             watchlist = serverWatchlist;
             localStorage.setItem('watchlist', JSON.stringify(watchlist));
           }
         }
-      } catch(e) { console.warn('Could not load watchlist from server:', e.message); }
+        if (prRes.ok) {
+          const serverPractice = await prRes.json();
+          if (Array.isArray(serverPractice) && serverPractice.length > 0) {
+            practiceAccounts = serverPractice;
+            localStorage.setItem('practice_accounts', JSON.stringify(practiceAccounts));
+          }
+        }
+        // Load portfolio from server
+        const portRes = await fetch(`${SERVER_URL}/api/portfolio`, { headers: { 'x-app-token': APP_TOKEN } });
+        if (portRes.ok) {
+          const serverPort = await portRes.json();
+          if (serverPort?.open?.length > 0 || serverPort?.closed?.length > 0) {
+            openPositions   = serverPort.open   || [];
+            closedPositions = serverPort.closed || [];
+            localStorage.setItem('portfolio_open',   JSON.stringify(openPositions));
+            localStorage.setItem('portfolio_closed', JSON.stringify(closedPositions));
+          }
+        }
+      } catch(e) { console.warn('Could not load from server:', e.message); }
     }
     if (API_KEY) {
       loadOverview();
