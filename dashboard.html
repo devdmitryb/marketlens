@@ -3162,8 +3162,12 @@
             const d = await r.json();
             arr = d?.historical || d;
           }
-          if (Array.isArray(arr) && arr[0]?.close) {
-            historicalPrices[date] = arr[0].close;
+          // Find entry matching the target date (array is newest-first)
+          const entry = Array.isArray(arr)
+            ? arr.find(r => r.date === date) || arr[arr.length - 1] // exact date or oldest
+            : null;
+          if (entry?.close) {
+            historicalPrices[date] = entry.close;
           }
         } catch {}
       }));
