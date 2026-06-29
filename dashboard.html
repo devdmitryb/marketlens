@@ -1381,8 +1381,10 @@
       <div class="dot"></div>
       <span id="marketStatusText">LIVE</span>
     </div>
+    <button class="btn secondary" onclick="syncToServer().then(ok => alert(ok ? '✅ Synced!' : '❌ Sync failed'))"
+      style="font-size:0.72rem;padding:5px 12px;margin-left:8px" title="Sync data to server">↑ Sync</button>
     <button class="btn secondary" onclick="logout()"
-      style="font-size:0.72rem;padding:5px 12px;margin-left:8px">Sign Out</button>
+      style="font-size:0.72rem;padding:5px 12px;margin-left:4px">Sign Out</button>
   </div>
 </header>
 
@@ -2031,6 +2033,27 @@
     window.location.href = '/login.html';
   }
 
+  async function syncToServer() {
+    if (!serverAvailable || !APP_TOKEN) return false;
+    try {
+      const [wl, pr, po] = await Promise.all([
+        fetch(`${SERVER_URL}/api/watchlist`, {
+          method: 'POST', headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbols: watchlist })
+        }),
+        fetch(`${SERVER_URL}/api/practice`, {
+          method: 'POST', headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accounts: practiceAccounts })
+        }),
+        fetch(`${SERVER_URL}/api/portfolio`, {
+          method: 'POST', headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ open: openPositions, closed: closedPositions })
+        }),
+      ]);
+      return wl.ok && pr.ok && po.ok;
+    } catch(e) { console.warn('Sync failed:', e.message); return false; }
+  }
+
   function saveKey() {
     const val   = document.getElementById('apiKeyInput').value.trim();
     const token = document.getElementById('appTokenInput')?.value.trim();
@@ -2093,14 +2116,7 @@
 
   function saveWatchlist() {
     localStorage.setItem('watchlist', JSON.stringify(watchlist));
-    // Sync to server if connected
-    if (serverAvailable && APP_TOKEN) {
-      fetch(`${SERVER_URL}/api/watchlist`, {
-        method:  'POST',
-        headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ symbols: watchlist }),
-      }).catch(e => console.warn('Watchlist sync failed:', e.message));
-    }
+    syncToServer();
   }
 
   // ══════════════════════════════════════════
@@ -3422,14 +3438,7 @@
   function savePortfolio() {
     localStorage.setItem('portfolio_open',   JSON.stringify(openPositions));
     localStorage.setItem('portfolio_closed', JSON.stringify(closedPositions));
-    // Sync to server
-    if (serverAvailable && APP_TOKEN) {
-      fetch(`${SERVER_URL}/api/portfolio`, {
-        method: 'POST',
-        headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ open: openPositions, closed: closedPositions }),
-      }).catch(e => console.warn('Portfolio sync failed:', e.message));
-    }
+    syncToServer();
   }
 
   async function refreshPortfolioSignals() {
@@ -4092,14 +4101,7 @@
 
   function savePracticeAccounts() {
     localStorage.setItem('practice_accounts', JSON.stringify(practiceAccounts));
-    // Sync to server
-    if (serverAvailable && APP_TOKEN) {
-      fetch(`${SERVER_URL}/api/practice`, {
-        method: 'POST',
-        headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accounts: practiceAccounts }),
-      }).catch(e => console.warn('Practice sync failed:', e.message));
-    }
+    syncToServer();
   }
 
   function isInAnyPracticeAccount(sym) {
