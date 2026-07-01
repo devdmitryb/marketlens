@@ -497,18 +497,24 @@
     }
     .add-watch-btn {
       background: none;
-      border: 1px solid var(--border);
-      color: var(--text-dim);
+      border: 1px solid var(--accent2);
+      color: var(--accent2);
       font-family: var(--mono);
       font-size: 0.72rem;
-      padding: 5px 10px;
+      font-weight: 600;
+      padding: 5px 12px;
       border-radius: 6px;
       cursor: pointer;
       transition: all 0.2s;
       white-space: nowrap;
     }
-    .add-watch-btn:hover { border-color: var(--accent2); color: var(--accent2); }
-    .add-watch-btn.added { border-color: var(--muted); color: var(--muted); cursor: default; }
+    .add-watch-btn:hover { background: var(--accent2); color: #0a0a0f; }
+    .add-watch-btn.added {
+      background: rgba(61,245,193,0.12);
+      border-color: var(--accent2);
+      color: var(--accent2);
+      cursor: default;
+    }
 
     /* ── PORTFOLIO ── */
     .portfolio-summary {
@@ -2667,9 +2673,9 @@
         });
         if (res.ok) {
           const data = await res.json();
-          // Pre-populate upside from server enrichment
+          // Map upsideData from server enrichment
           data.forEach(item => {
-            if (item.upsideData?.upside !== undefined) {
+            if (item.upsideData?.upside !== undefined && item.upsideData?.upside !== null) {
               screenerUpside[item.symbol] = item.upsideData.upside;
             }
           });
@@ -2792,16 +2798,17 @@
 
       const inWatch = watchlist.includes(item.symbol);
 
-      // Upside cell
       let upsideCell;
       if (upside === undefined) {
         upsideCell = `<span style="color:var(--muted);font-family:var(--mono);font-size:0.72rem">—</span>`;
       } else if (upside === null) {
         upsideCell = `<span style="color:var(--muted);font-family:var(--mono);font-size:0.72rem">n/a</span>`;
       } else {
-        const col = upside >= threshold ? 'var(--accent2)' : 'var(--muted)';
-        const icon = upside >= threshold ? '🟢' : '🔴';
-        upsideCell = `<span style="font-family:var(--mono);font-size:0.82rem;color:${col};font-weight:600">${icon} ${upside > 0 ? '+' : ''}${upside.toFixed(1)}%</span>`;
+        const aboveThreshold = upside >= threshold;
+        const col  = aboveThreshold ? 'var(--accent2)' : upside > 0 ? 'var(--text-dim)' : 'var(--danger)';
+        const icon = aboveThreshold ? '🟢' : upside > 0 ? '' : '🔴';
+        const weight = aboveThreshold ? '700' : '400';
+        upsideCell = `<span style="font-family:var(--mono);font-size:0.82rem;color:${col};font-weight:${weight}">${icon}${icon?' ':''}${upside > 0 ? '+' : ''}${upside.toFixed(1)}%</span>`;
       }
 
       row.innerHTML = `
