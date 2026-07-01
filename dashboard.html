@@ -1366,6 +1366,12 @@
 
 <header>
   <div class="logo">Market<span>Lens</span></div>
+  <div style="display:flex;align-items:center;gap:6px;flex:1;max-width:200px">
+    <input id="quickSymInput" type="text" placeholder="Symbol…"
+      style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.82rem;padding:6px 10px;border-radius:7px;outline:none;width:100%;text-transform:uppercase"
+      oninput="this.value=this.value.toUpperCase()"
+      onkeydown="if(event.key==='Enter'){openDrawer(this.value.trim());this.value='';this.blur()}" />
+  </div>
   <nav>
     <button class="active" onclick="showPage('overview')">🌐 Overview</button>
     <button onclick="showPage('dashboard')">Watchlist</button>
