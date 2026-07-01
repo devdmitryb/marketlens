@@ -1541,7 +1541,7 @@
     </div>
 
     <!-- Tabs + Add button -->
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
       <div class="portfolio-tabs">
         <button class="ptab active" onclick="switchPortfolioTab('open')">Open Positions</button>
         <button class="ptab" onclick="switchPortfolioTab('closed')">Closed Positions</button>
@@ -1550,6 +1550,12 @@
         <button class="btn secondary" onclick="refreshPortfolioSignals()" id="refreshSignalsBtn">↻ Refresh Signals</button>
         <button class="btn" onclick="openAddPosition()">+ Add Position</button>
       </div>
+    </div>
+    <div class="filter-group" style="margin-bottom:16px">
+      <button class="filter-btn active-all" id="pf-all"    onclick="setPortfolioFilter('all')">All</button>
+      <button class="filter-btn" id="pf-action" onclick="setPortfolioFilter('action')">🔴 Action Needed</button>
+      <button class="filter-btn" id="pf-buy"    onclick="setPortfolioFilter('buy')">🟢 Buy More</button>
+      <button class="filter-btn" id="pf-wait"   onclick="setPortfolioFilter('wait')">⏳ Wait</button>
     </div>
 
     <!-- Open positions -->
@@ -1713,14 +1719,23 @@
     </div>
 
     <!-- Tabs -->
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
       <div class="portfolio-tabs">
         <button class="ptab active" onclick="switchPracticeTab('open')">Open Positions</button>
         <button class="ptab" onclick="switchPracticeTab('closed')">Closed Positions</button>
         <button class="ptab" onclick="switchPracticeTab('trades')">Trade Log</button>
       </div>
-      <button class="btn secondary" onclick="refreshPracticePrices()" style="font-size:0.8rem">↻ Refresh Prices</button>
-      <button class="btn secondary" onclick="refreshPracticeSignals()" style="font-size:0.8rem">↻ Refresh Signals</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn secondary" onclick="refreshPracticePrices()" style="font-size:0.8rem">↻ Refresh Prices</button>
+        <button class="btn secondary" onclick="refreshPracticeSignals()" style="font-size:0.8rem">↻ Signals</button>
+      </div>
+    </div>
+    <div class="filter-group" style="margin-bottom:16px">
+      <button class="filter-btn active-all" id="prfi-all"    onclick="setPracticeFilter('all')">All</button>
+      <button class="filter-btn" id="prfi-action" onclick="setPracticeFilter('action')">🔴 Action Needed</button>
+      <button class="filter-btn" id="prfi-buy"    onclick="setPracticeFilter('buy')">🟢 Buy More</button>
+      <button class="filter-btn" id="prfi-wait"   onclick="setPracticeFilter('wait')">⏳ Wait</button>
+    </div>
     </div>
 
     <!-- Open positions -->
@@ -3460,6 +3475,36 @@
     if (btn) { btn.textContent = '↻ Refresh Signals'; btn.disabled = false; }
   }
 
+  // ── PORTFOLIO FILTER ──
+  let portfolioFilter = 'all';
+  function setPortfolioFilter(f) {
+    portfolioFilter = f;
+    ['all','action','buy','wait'].forEach(id => {
+      const btn = document.getElementById('pf-' + id);
+      if (btn) btn.className = 'filter-btn' + (id === f ? (f==='action'?' active-sell':' active-all') : '');
+    });
+    renderOpenPositions();
+  }
+
+  // ── PRACTICE FILTER ──
+  let practiceFilter = 'all';
+  function setPracticeFilter(f) {
+    practiceFilter = f;
+    ['all','action','buy','wait'].forEach(id => {
+      const btn = document.getElementById('prfi-' + id);
+      if (btn) btn.className = 'filter-btn' + (id === f ? (f==='action'?' active-sell':' active-all') : '');
+    });
+    renderPractice();
+  }
+
+  function signalMatchesPortfolioFilter(signal, filter) {
+    if (filter === 'all')    return true;
+    if (filter === 'action') return signal?.includes('SELL') || signal?.includes('TRIM');
+    if (filter === 'buy')    return signal?.includes('BUY — CONFIRMED') || signal?.includes('BUY — WATCH');
+    if (filter === 'wait')   return signal?.includes('WAIT');
+    return true;
+  }
+
   function switchPortfolioTab(tab) {
     document.querySelectorAll('.ptab').forEach(b => b.classList.remove('active'));
     event.target.classList.add('active');
@@ -3614,6 +3659,13 @@
     });
 
     Object.entries(grouped).forEach(([sym, lots]) => {
+      // Apply signal filter
+      if (portfolioFilter !== 'all') {
+        const sigResult = stockData[sym] ? calcSignal(stockData[sym]) : null;
+        const sig = sigResult?.signal ?? '';
+        if (!signalMatchesPortfolioFilter(sig, portfolioFilter)) return;
+      }
+
       const currentPrice = livePortfolioPrices[sym];
       const sigResult    = stockData[sym] ? calcSignal(stockData[sym]) : null;
       const signal       = sigResult?.signal ?? '—';
@@ -4442,6 +4494,12 @@
     } else {
       openTbl.innerHTML = '';
       acc.open.forEach((pos, i) => {
+        // Apply signal filter
+        if (practiceFilter !== 'all') {
+          const sigResult = stockData[pos.sym] ? calcSignal(stockData[pos.sym]) : null;
+          const sig = sigResult?.signal ?? '';
+          if (!signalMatchesPortfolioFilter(sig, practiceFilter)) return;
+        }
         const cur    = livePracticePrices[pos.sym];
         const days   = Math.round((Date.now() - new Date(pos.date)) / 86400000);
         let pnlHtml  = '<span style="color:var(--muted);font-size:0.75rem">loading…</span>';
