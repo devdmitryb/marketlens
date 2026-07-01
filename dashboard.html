@@ -1098,7 +1098,11 @@
         { display: none; }
 
       /* ── OVERVIEW ── */
+      .overview-grid { grid-template-columns: 1fr 1fr !important; }
       .ov-grid { grid-template-columns: 1fr 1fr !important; }
+      .ov-card { padding: 14px 12px !important; }
+      .ov-card.wide { grid-column: span 1 !important; }
+      #fg-advice { font-size: 0.72rem !important; }
 
       /* ── BACKTEST TOOLBAR ── */
       .bt-toolbar {
