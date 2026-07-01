@@ -1125,16 +1125,20 @@
         padding: 8px 10px !important;
       }
 
-      /* ── FIX OVERFLOW — override all fixed-width grids ── */
+      /* ── SCREENER ── */
       .screener-header { display: none; }
       .screener-row {
         display: grid !important;
-        grid-template-columns: 1fr auto !important;
-        grid-template-rows: auto auto !important;
-        gap: 6px !important;
+        grid-template-columns: 80px 1fr 80px 70px !important;
+        grid-template-rows: auto !important;
+        gap: 8px !important;
         padding: 10px 8px !important;
+        align-items: center;
       }
-      .screener-row > *:not(:nth-child(1)):not(:nth-child(2)):not(:nth-child(7)):not(:nth-child(8)) { display: none !important; }
+      /* Show: col1(symbol), col5(action), col6(upside), col7(watch) — hide rest */
+      .screener-row > div:nth-child(2),
+      .screener-row > div:nth-child(3),
+      .screener-row > div:nth-child(4) { display: none !important; }
 
       .closed-header { display: none !important; }
       .closed-row {
