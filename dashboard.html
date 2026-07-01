@@ -2749,6 +2749,9 @@
     }
 
     list.innerHTML = '';
+    // Filter out ADR symbols (5 letters ending in Y or F) and OTC pink sheets
+    const isADR = sym => /^[A-Z]{4,5}[YF]$/.test(sym) || sym.includes('.');
+    rows = rows.filter(item => !isADR(item.symbol));
     rows.forEach((item, i) => {
       const isNew = new Date(item.publishedDate).getTime() > lastVisitTime;
       const upside = screenerUpside.hasOwnProperty(item.symbol) ? screenerUpside[item.symbol] : undefined;
@@ -3068,9 +3071,9 @@
       if (serverAvailable && APP_TOKEN) {
         const headers = { 'x-app-token': APP_TOKEN };
         [quote, grades, target, earnings] = await Promise.all([
-          fetch(`${SERVER_URL}/api/quote/${sym}`,    { headers }).then(r => r.json()),
-          fetch(`${SERVER_URL}/api/grades/${sym}`,   { headers }).then(r => r.json()),
-          fetch(`${SERVER_URL}/api/target/${sym}`,   { headers }).then(r => r.json()),
+          fetch(`${SERVER_URL}/api/quote/${sym}`,    { headers }).then(r => r.json()).catch(() => null),
+          fetch(`${SERVER_URL}/api/grades/${sym}`,   { headers }).then(r => r.json()).catch(() => []),
+          fetch(`${SERVER_URL}/api/target/${sym}`,   { headers }).then(r => r.json()).catch(() => null),
           fetch(`${SERVER_URL}/api/earnings/${sym}`, { headers }).then(r => r.json()).catch(() => []),
         ]);
         // Normalize
