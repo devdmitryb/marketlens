@@ -1552,10 +1552,11 @@
       </div>
     </div>
     <div class="filter-group" style="margin-bottom:16px">
-      <button class="filter-btn active-all" id="pf-all"    onclick="setPortfolioFilter('all')">All</button>
-      <button class="filter-btn" id="pf-action" onclick="setPortfolioFilter('action')">🔴 Action Needed</button>
-      <button class="filter-btn" id="pf-buy"    onclick="setPortfolioFilter('buy')">🟢 Buy More</button>
-      <button class="filter-btn" id="pf-wait"   onclick="setPortfolioFilter('wait')">⏳ Wait</button>
+      <button class="filter-btn active-all" id="pf-all"       onclick="setPortfolioFilter('all')">All</button>
+      <button class="filter-btn" id="pf-action"    onclick="setPortfolioFilter('action')">🔴 Action Needed</button>
+      <button class="filter-btn" id="pf-confirmed" onclick="setPortfolioFilter('confirmed')">🟢 Confirmed</button>
+      <button class="filter-btn" id="pf-watch"     onclick="setPortfolioFilter('watch')">👁 Watch</button>
+      <button class="filter-btn" id="pf-wait"      onclick="setPortfolioFilter('wait')">⏳ Wait</button>
     </div>
 
     <!-- Open positions -->
@@ -1731,10 +1732,11 @@
       </div>
     </div>
     <div class="filter-group" style="margin-bottom:16px">
-      <button class="filter-btn active-all" id="prfi-all"    onclick="setPracticeFilter('all')">All</button>
-      <button class="filter-btn" id="prfi-action" onclick="setPracticeFilter('action')">🔴 Action Needed</button>
-      <button class="filter-btn" id="prfi-buy"    onclick="setPracticeFilter('buy')">🟢 Buy More</button>
-      <button class="filter-btn" id="prfi-wait"   onclick="setPracticeFilter('wait')">⏳ Wait</button>
+      <button class="filter-btn active-all" id="prfi-all"       onclick="setPracticeFilter('all')">All</button>
+      <button class="filter-btn" id="prfi-action"    onclick="setPracticeFilter('action')">🔴 Action Needed</button>
+      <button class="filter-btn" id="prfi-confirmed" onclick="setPracticeFilter('confirmed')">🟢 Confirmed</button>
+      <button class="filter-btn" id="prfi-watch"     onclick="setPracticeFilter('watch')">👁 Watch</button>
+      <button class="filter-btn" id="prfi-wait"      onclick="setPracticeFilter('wait')">⏳ Wait</button>
     </div>
     </div>
 
@@ -3475,22 +3477,20 @@
     if (btn) { btn.textContent = '↻ Refresh Signals'; btn.disabled = false; }
   }
 
-  // ── PORTFOLIO FILTER ──
   let portfolioFilter = 'all';
   function setPortfolioFilter(f) {
     portfolioFilter = f;
-    ['all','action','buy','wait'].forEach(id => {
+    ['all','action','confirmed','watch','wait'].forEach(id => {
       const btn = document.getElementById('pf-' + id);
       if (btn) btn.className = 'filter-btn' + (id === f ? (f==='action'?' active-sell':' active-all') : '');
     });
     renderOpenPositions();
   }
 
-  // ── PRACTICE FILTER ──
   let practiceFilter = 'all';
   function setPracticeFilter(f) {
     practiceFilter = f;
-    ['all','action','buy','wait'].forEach(id => {
+    ['all','action','confirmed','watch','wait'].forEach(id => {
       const btn = document.getElementById('prfi-' + id);
       if (btn) btn.className = 'filter-btn' + (id === f ? (f==='action'?' active-sell':' active-all') : '');
     });
@@ -3498,10 +3498,11 @@
   }
 
   function signalMatchesPortfolioFilter(signal, filter) {
-    if (filter === 'all')    return true;
-    if (filter === 'action') return signal?.includes('SELL') || signal?.includes('TRIM');
-    if (filter === 'buy')    return signal?.includes('BUY — CONFIRMED') || signal?.includes('BUY — WATCH');
-    if (filter === 'wait')   return signal?.includes('WAIT');
+    if (filter === 'all')       return true;
+    if (filter === 'action')    return signal?.includes('SELL') || signal?.includes('TRIM');
+    if (filter === 'confirmed') return signal === 'BUY — CONFIRMED';
+    if (filter === 'watch')     return signal === 'BUY — WATCH';
+    if (filter === 'wait')      return signal === 'BUY — WAIT' || signal === 'WAIT';
     return true;
   }
 
