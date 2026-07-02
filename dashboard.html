@@ -1129,6 +1129,9 @@
         padding: 8px 10px !important;
       }
 
+      /* Quick symbol search — hide on mobile, no space */
+      #quickSymWrapper { display: none !important; }
+
       /* ── SCREENER ── */
       .screener-header { display: none; }
       .screener-row {
@@ -1366,11 +1369,13 @@
 
 <header>
   <div class="logo">Market<span>Lens</span></div>
-  <div style="display:flex;align-items:center;gap:6px;flex:1;max-width:200px">
-    <input id="quickSymInput" type="text" placeholder="Symbol…"
+  <div id="quickSymWrapper" style="display:flex;align-items:center;gap:6px;min-width:100px;max-width:160px">
+    <input id="quickSymInput" type="search" placeholder="🔍 Symbol…"
+      autocomplete="off" autocorrect="off" autocapitalize="characters"
+      spellcheck="false" inputmode="text"
       style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.82rem;padding:6px 10px;border-radius:7px;outline:none;width:100%;text-transform:uppercase"
       oninput="this.value=this.value.toUpperCase()"
-      onkeydown="if(event.key==='Enter'){openDrawer(this.value.trim());this.value='';this.blur()}" />
+      onkeydown="if(event.key==='Enter'&&this.value.trim()){openDrawer(this.value.trim());this.value='';this.blur()}" />
   </div>
   <nav>
     <button class="active" onclick="showPage('overview')">🌐 Overview</button>
