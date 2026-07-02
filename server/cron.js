@@ -49,13 +49,21 @@ async function collectScreenerFeed() {
 async function refreshWatchedSymbols() {
   console.log('[cron] Refreshing watched symbols…');
   const watchlist = store.read('watchlist', []);
-  if (!watchlist.length) return;
+  const portfolio = store.read('portfolio', { open: [], closed: [] });
+  const practice  = store.read('practice', []);
+
+  // All symbols that need monitoring — watchlist + open portfolio + open practice
+  const portfolioSyms = (portfolio.open || []).map(p => p.sym);
+  const practiceSyms  = practice.flatMap(a => (a.open || []).map(p => p.sym));
+  const allSyms = [...new Set([...watchlist, ...portfolioSyms, ...practiceSyms])];
+
+  if (!allSyms.length) return;
 
   const quotes  = store.read('quotes', {});
   const signals = store.read('signals', {});
   const changed = [];
 
-  for (const sym of watchlist) {
+  for (const sym of allSyms) {
     try {
       const [quote, grades, target] = await Promise.all([
         fmp.getQuote(sym),
@@ -97,9 +105,18 @@ async function refreshWatchedSymbols() {
         changed.push({ sym, from: prevSignal, to: newSignal, upside });
         console.log(`[cron] Signal change: ${sym} ${prevSignal} → ${newSignal}`);
         logSignalChange(sym, newSignal, prevSignal, upside);
-        // Send email for critical signals
-        if (isCriticalSignal(newSignal)) {
-          await sendEmailAlert(sym, newSignal, prevSignal, upside);
+
+        const inPortfolio = portfolioSyms.includes(sym);
+        const inPractice  = practiceSyms.includes(sym);
+        const inWatchlist = watchlist.includes(sym);
+
+        // Email: BUY-CONFIRMED for watchlist (not already in portfolio/practice)
+        if (inWatchlist && !inPortfolio && !inPractice && newSignal === 'BUY — CONFIRMED') {
+          await sendEmailAlert(sym, newSignal, prevSignal, upside, '🟢 Time to BUY!');
+        }
+        // Email: SELL signals for portfolio and practice
+        if ((inPortfolio || inPractice) && isCriticalSignal(newSignal)) {
+          await sendEmailAlert(sym, newSignal, prevSignal, upside, '🔴 Time to SELL!');
         }
       }
 
@@ -112,7 +129,7 @@ async function refreshWatchedSymbols() {
 
   store.write('quotes', quotes);
   store.write('signals', signals);
-  console.log(`[cron] Refreshed ${watchlist.length} symbols, ${changed.length} signal changes`);
+  console.log(`[cron] Refreshed ${allSyms.length} symbols (${watchlist.length} watchlist + ${portfolioSyms.length} portfolio + ${practiceSyms.length} practice), ${changed.length} signal changes`);
 }
 
 // ── JOB 3: Screener upside enrichment ────────────────────────────
@@ -149,15 +166,16 @@ async function enrichScreenerUpside() {
 }
 
 // ── EMAIL ALERTS ─────────────────────────────────────────────────
-async function sendEmailAlert(sym, newSignal, oldSignal, upside) {
+async function sendEmailAlert(sym, newSignal, oldSignal, upside, context = '') {
   const user = process.env.GMAIL_USER;
   const pass = process.env.GMAIL_APP_PASSWORD;
   if (!user || !pass) return;
 
-  const subject = `🚨 MarketLens: ${sym} — ${newSignal}`;
+  const subject = `${context} MarketLens: ${sym} — ${newSignal}`;
   const body = `
-Signal Alert for ${sym}
+${context}
 
+Symbol:      ${sym}
 New Signal:  ${newSignal}
 Old Signal:  ${oldSignal}
 Upside:      ${upside?.toFixed(1)}%
