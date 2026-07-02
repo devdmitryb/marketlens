@@ -1129,8 +1129,9 @@
         padding: 8px 10px !important;
       }
 
-      /* Quick symbol search — hide on mobile, no space */
+      /* Quick symbol search — icon only on mobile */
       #quickSymWrapper { display: none !important; }
+      #quickSymBtn { display: flex !important; }
 
       /* ── SCREENER ── */
       .screener-header { display: none; }
@@ -1375,8 +1376,18 @@
       spellcheck="false" inputmode="text"
       style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.82rem;padding:6px 10px;border-radius:7px;outline:none;width:100%;text-transform:uppercase"
       oninput="this.value=this.value.toUpperCase()"
-      onkeydown="if(event.key==='Enter'&&this.value.trim()){openDrawer(this.value.trim());this.value='';this.blur()}" />
+      onkeydown="if(event.key==='Enter'&&this.value.trim()){openDrawer(this.value.trim());this.value='';this.blur()}"
+      onblur="if(!this.value){const w=document.getElementById('quickSymWrapper');const b=document.getElementById('quickSymBtn');if(window.innerWidth<=768){w.style.cssText='display:none!important';b.style.display='flex';}}" />
   </div>
+  <button id="quickSymBtn"
+    style="display:none;background:none;border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;cursor:pointer;font-size:1rem"
+    onclick="
+      const w = document.getElementById('quickSymWrapper');
+      const b = document.getElementById('quickSymBtn');
+      w.style.cssText = 'display:flex!important;align-items:center;gap:6px;min-width:120px;max-width:180px;position:absolute;left:50%;transform:translateX(-50%);z-index:999;background:var(--bg);padding:4px';
+      b.style.display = 'none';
+      document.getElementById('quickSymInput').focus();
+    ">🔍</button>
   <nav>
     <button class="active" onclick="showPage('overview')">🌐 Overview</button>
     <button onclick="showPage('dashboard')">Watchlist</button>
