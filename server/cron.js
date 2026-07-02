@@ -97,6 +97,10 @@ async function refreshWatchedSymbols() {
         changed.push({ sym, from: prevSignal, to: newSignal, upside });
         console.log(`[cron] Signal change: ${sym} ${prevSignal} → ${newSignal}`);
         logSignalChange(sym, newSignal, prevSignal, upside);
+        // Send email for critical signals
+        if (isCriticalSignal(newSignal)) {
+          await sendEmailAlert(sym, newSignal, prevSignal, upside);
+        }
       }
 
       // Rate limit — small delay between symbols
@@ -144,7 +148,49 @@ async function enrichScreenerUpside() {
   console.log(`[cron] Enriched ${Object.keys(upside).length} symbols`);
 }
 
-// ── HELPERS ───────────────────────────────────────────────────────
+// ── EMAIL ALERTS ─────────────────────────────────────────────────
+async function sendEmailAlert(sym, newSignal, oldSignal, upside) {
+  const user = process.env.GMAIL_USER;
+  const pass = process.env.GMAIL_APP_PASSWORD;
+  if (!user || !pass) return;
+
+  const subject = `🚨 MarketLens: ${sym} — ${newSignal}`;
+  const body = `
+Signal Alert for ${sym}
+
+New Signal:  ${newSignal}
+Old Signal:  ${oldSignal}
+Upside:      ${upside?.toFixed(1)}%
+
+Open MarketLens: https://marketlens-bt5u.onrender.com
+  `.trim();
+
+  // Send via Gmail SMTP using raw HTTP (no nodemailer needed)
+  const https  = require('https');
+  const auth   = Buffer.from(`${user}:${pass}`).toString('base64');
+
+  // Use Gmail API via SMTP - simpler: just use nodemailer
+  try {
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransporter({
+      service: 'gmail',
+      auth: { user, pass },
+    });
+    await transporter.sendMail({
+      from: `"MarketLens" <${user}>`,
+      to:   user,
+      subject,
+      text: body,
+    });
+    console.log(`[email] Alert sent: ${sym} ${newSignal}`);
+  } catch(e) {
+    console.error('[email] Failed:', e.message);
+  }
+}
+
+function isCriticalSignal(signal) {
+  return signal === 'SELL — REVERSAL' || signal === 'TRIM' || signal === 'SELL';
+}
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function calcSimpleSignal(tally, upsidePct) {
