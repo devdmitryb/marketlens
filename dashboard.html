@@ -1648,6 +1648,15 @@
         <input type="number" id="bt-capital" value="200" min="50" step="50"
           style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.85rem;padding:7px 12px;border-radius:8px;outline:none;width:90px" />
       </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:0.78rem;color:var(--text-dim)">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="bt-stoploss" style="accent-color:var(--accent2)" />
+          Stop-loss
+        </label>
+        <input type="number" id="bt-stoploss-pct" value="33" min="5" max="90" step="1"
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.82rem;padding:5px 8px;border-radius:7px;outline:none;width:55px" />
+        <span>%</span>
+      </div>
       <button class="btn" onclick="runBacktest()" id="bt-run-btn">🔬 Run Backtest</button>
       <button class="btn secondary" onclick="openScanList()" id="bt-scan-btn">📡 Scan List</button>
       <span id="bt-status" style="font-size:0.78rem;color:var(--text-dim)"></span>
@@ -4887,7 +4896,10 @@
 
       status.textContent = `Simulating ${history.length} trading days…`;
 
-      const result = simulateStrategy(history, grades, target, capital, sym);
+      const useStopLoss = document.getElementById('bt-stoploss')?.checked;
+    const stopLossPct = useStopLoss ? parseFloat(document.getElementById('bt-stoploss-pct').value) || 33 : null;
+
+    const result = simulateStrategy(history, grades, target, capital, sym, stopLossPct);
       const bh     = calcBuyAndHold(history, capital);
       const xbi    = calcBuyAndHold(xbiHist, capital);
       const spy    = calcBuyAndHold(spyHist, capital);
@@ -4909,7 +4921,7 @@
     btn.disabled = false; btn.textContent = '🔬 Run Backtest';
   }
 
-  function simulateStrategy(history, grades, target, positionSize, sym) {
+  function simulateStrategy(history, grades, target, positionSize, sym, stopLossPct = null) {
     const COMM = 10;
     let cumulativePnl = 0;  // track total across all trades
     let shares = 0;
@@ -5032,7 +5044,13 @@
           ((mockTarget.targetConsensus - price) / price * 100) < 20;
 
         const isLastDay = i === history.length - 1;
-        const exitReason = shouldExit ? signal
+
+        // Stop-loss check
+        const stopLossHit = stopLossPct && entryPrice &&
+          ((entryPrice - price) / entryPrice * 100) >= stopLossPct;
+
+        const exitReason = stopLossHit ? `STOP-LOSS -${stopLossPct}%`
+          : shouldExit ? signal
           : hitTarget ? 'HIT TARGET'
           : nearTargetExit ? 'NEAR TARGET — EXIT'
           : analystsBearish ? 'ANALYSTS BEARISH'
