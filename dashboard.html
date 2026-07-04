@@ -4637,6 +4637,8 @@
   async function openScanList() {
     const positionSize = parseFloat(document.getElementById('bt-capital').value) || 200;
     const years        = parseInt(document.getElementById('bt-period').value) || 3;
+    const useStopLoss  = document.getElementById('bt-stoploss')?.checked;
+    const stopLossPct  = useStopLoss ? parseFloat(document.getElementById('bt-stoploss-pct').value) || 33 : null;
 
     if (!API_KEY && !serverAvailable) { alert('Please save your API key first.'); return; }
 
@@ -4721,7 +4723,7 @@
           continue;
         }
 
-        const result = simulateStrategy(history, grades, target, positionSize, sym);
+        const result = simulateStrategy(history, grades, target, positionSize, sym, stopLossPct);
         const bh     = calcBuyAndHold(history, positionSize);
 
         // Find best single trade
@@ -4753,6 +4755,36 @@
     results.forEach((r, i) => {
       updateScanRow(r.sym, r.result, { bestTrade: r.bestTrade, avgReturn: r.avgReturn, vsHold: r.vsHold, bh: r.bh }, null, i);
     });
+
+    // ── Totals row ──
+    const totalSyms    = results.length;
+    const withIx       = results.filter(r => r.bestTrade >= 100).length;
+    const pctWithIx    = totalSyms > 0 ? (withIx / totalSyms * 100).toFixed(0) : 0;
+    const totalPnl     = results.reduce((s, r) => s + (r.result.totalPnl || 0), 0);
+    const allReturns   = results.flatMap(r => r.result.trades.filter(t => !t.isOpen).map(t => t.pct));
+    const avgReturn    = allReturns.length > 0 ? allReturns.reduce((a, b) => a + b, 0) / allReturns.length : 0;
+    const totalTrades  = results.reduce((s, r) => s + r.result.trades.filter(t => !t.isOpen).length, 0);
+
+    const totalsRow = document.createElement('tr');
+    totalsRow.style.cssText = 'border-top:2px solid var(--border);background:rgba(255,255,255,0.03);font-weight:600';
+    totalsRow.innerHTML = `
+      <td style="padding:10px 12px;color:var(--muted);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em">
+        ${totalSyms} symbols · ${totalTrades} trades
+      </td>
+      <td style="padding:10px 12px;text-align:right;font-family:var(--mono)">${totalTrades}</td>
+      <td style="padding:10px 12px;text-align:right;font-family:var(--mono);color:var(--accent)">
+        🎯 ${withIx} (${pctWithIx}%)
+      </td>
+      <td style="padding:10px 12px;text-align:right;font-family:var(--mono);color:${totalPnl>=0?'var(--accent2)':'var(--danger)'};font-size:1rem">
+        ${totalPnl>=0?'+':''}$${totalPnl.toFixed(0)}
+      </td>
+      <td style="padding:10px 12px;text-align:right;font-family:var(--mono);color:var(--accent2)">
+        ${avgReturn>=0?'+':''}${avgReturn.toFixed(1)}%
+      </td>
+      <td colspan="3" style="padding:10px 12px;color:var(--muted);font-size:0.72rem">
+        ${stopLossPct ? `Stop-loss: -${stopLossPct}%` : 'No stop-loss'}
+      </td>`;
+    tbody.appendChild(totalsRow);
 
     progBar.style.width = '100%';
     progTxt.textContent = `Done! ${results.length} symbols scanned. Sorted by Total P&L.`;
