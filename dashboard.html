@@ -4761,9 +4761,10 @@
     const withIx       = results.filter(r => r.bestTrade >= 100).length;
     const pctWithIx    = totalSyms > 0 ? (withIx / totalSyms * 100).toFixed(0) : 0;
     const totalPnl     = results.reduce((s, r) => s + (r.result.totalPnl || 0), 0);
-    const allReturns   = results.flatMap(r => r.result.trades.filter(t => !t.isOpen).map(t => t.pct));
-    const avgReturn    = allReturns.length > 0 ? allReturns.reduce((a, b) => a + b, 0) / allReturns.length : 0;
     const totalTrades  = results.reduce((s, r) => s + r.result.trades.filter(t => !t.isOpen).length, 0);
+    // Avg return = total P&L / total invested
+    const totalInvested = totalTrades * positionSize;
+    const avgReturn     = totalInvested > 0 ? (totalPnl / totalInvested * 100) : 0;
 
     const totalsRow = document.createElement('tr');
     totalsRow.style.cssText = 'border-top:2px solid var(--border);background:rgba(255,255,255,0.03);font-weight:600';
