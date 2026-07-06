@@ -59,17 +59,29 @@ async function refreshWatchedSymbols() {
 
   if (!allSyms.length) return;
 
-  const quotes  = store.read('quotes', {});
-  const signals = store.read('signals', {});
-  const changed = [];
+  const quotes   = store.read('quotes', {});
+  const signals  = store.read('signals', {});
+  const gradeCache  = store.read('grades_cache', {});
+  const targetCache = store.read('target_cache', {});
+  const changed  = [];
+  const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
   for (const sym of allSyms) {
     try {
+      // Check cache for grades and target
+      const now = Date.now();
+      const gradesFresh  = gradeCache[sym]  && (now - new Date(gradeCache[sym].cachedAt).getTime())  < CACHE_TTL;
+      const targetFresh  = targetCache[sym] && (now - new Date(targetCache[sym].cachedAt).getTime()) < CACHE_TTL;
+
       const [quote, grades, target] = await Promise.all([
         fmp.getQuote(sym),
-        fmp.getGrades(sym),
-        fmp.getTarget(sym),
+        gradesFresh  ? Promise.resolve(gradeCache[sym].data)  : fmp.getGrades(sym),
+        targetFresh  ? Promise.resolve(targetCache[sym].data) : fmp.getTarget(sym),
       ]);
+
+      // Update caches
+      if (!gradesFresh  && grades)  gradeCache[sym]  = { data: grades,  cachedAt: new Date().toISOString() };
+      if (!targetFresh  && target)  targetCache[sym] = { data: target,  cachedAt: new Date().toISOString() };
 
       if (quote) quotes[sym] = { ...quote, cachedAt: new Date().toISOString() };
 
@@ -120,8 +132,8 @@ async function refreshWatchedSymbols() {
         }
       }
 
-      // Rate limit — small delay between symbols
-      await sleep(300);
+      // Rate limit — increased delay between symbols to avoid FMP 429
+      await sleep(800);
     } catch(e) {
       console.error(`[cron] Error refreshing ${sym}:`, e.message);
     }
@@ -129,6 +141,8 @@ async function refreshWatchedSymbols() {
 
   store.write('quotes', quotes);
   store.write('signals', signals);
+  store.write('grades_cache', gradeCache);
+  store.write('target_cache', targetCache);
   console.log(`[cron] Refreshed ${allSyms.length} symbols (${watchlist.length} watchlist + ${portfolioSyms.length} portfolio + ${practiceSyms.length} practice), ${changed.length} signal changes`);
 }
 
