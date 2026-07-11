@@ -2967,6 +2967,31 @@
     }
 
     renderChart(wrap, history, sym);
+
+    // Re-render volume signal section now that chart data is available
+    const volSignalEl = document.getElementById('drawerVolSignal');
+    if (volSignalEl) {
+      const recent = history.slice(-6);
+      const last5  = recent.slice(-5);
+      const avgVol  = last5.slice(0,4).reduce((s,d) => s + (d.volume||0), 0) / 4;
+      const todayVol = last5[last5.length-1]?.volume || 0;
+      const priceDir = last5[last5.length-1]?.close > last5[last5.length-2]?.close ? 'up' : 'down';
+      const volDir   = todayVol > avgVol ? 'up' : 'down';
+      let signal, icon, color, advice;
+      if (priceDir==='up' && volDir==='up')        { signal='Confirmed move';    icon='✅'; color='var(--accent2)';  advice='Price rising with volume — strong signal'; }
+      else if (priceDir==='down' && volDir==='down'){ signal='Normal pullback';   icon='🟡'; color='var(--text-dim)'; advice='Price dipping on low volume — sellers not aggressive'; }
+      else if (priceDir==='up' && volDir==='down')  { signal='Weak move';         icon='⚠️'; color='#f59e0b';        advice='Price rising but low volume — watch for reversal'; }
+      else                                           { signal='Selling pressure';  icon='🔴'; color='var(--danger)';  advice='Price falling on high volume — be careful'; }
+      const volRatio = avgVol > 0 ? (todayVol/avgVol).toFixed(1) : '?';
+      volSignalEl.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span style="font-size:1.4rem">${icon}</span>
+          <span style="font-weight:600;color:${color}">${signal}</span>
+        </div>
+        <div style="font-size:0.75rem;color:var(--text-dim);margin-bottom:8px">${advice}</div>
+        <div class="stat-row"><span class="stat-label">Price</span><span class="stat-value">${priceDir==='up'?'↑ Rising':'↓ Falling'}</span></div>
+        <div class="stat-row"><span class="stat-label">Volume vs avg</span><span class="stat-value" style="color:${volDir==='up'?'var(--accent2)':'var(--text-dim)'}">${volDir==='up'?'↑':'↓'} ${volRatio}x</span></div>`;
+    }
   }
 
   function renderChart(wrap, history, sym) {
@@ -3161,6 +3186,11 @@
 
       if (quote?.name) document.getElementById('drawerName').textContent = quote.name;
 
+      // Auto-load 30d chart for Volume Signal (if not cached)
+      if (!chartCache[`${sym}_30`]) {
+        loadChart(sym, 30).catch(() => {});
+      }
+
       // tally last 90 days
       const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 90);
       const recent = grades.filter(g => new Date(g.date) >= cutoff);
@@ -3320,6 +3350,16 @@
             <span class="stat-value ${changeClass}">${changeSign}${(quote?.changePercentage ?? 0).toFixed(2)}%</span>
           </div>
           <div class="stat-row">
+            <span class="stat-label">Market Cap</span>
+            <span class="stat-value">${quote?.marketCap ? (() => {
+              const mc = quote.marketCap;
+              if (mc >= 1e12) return '$' + (mc/1e12).toFixed(1) + 'T';
+              if (mc >= 1e9)  return '$' + (mc/1e9).toFixed(1)  + 'B';
+              if (mc >= 1e6)  return '$' + (mc/1e6).toFixed(0)  + 'M';
+              return '$' + mc.toLocaleString();
+            })() : '—'}</span>
+          </div>
+          <div class="stat-row">
             <span class="stat-label">52w High</span>
             <span class="stat-value">$${quote?.yearHigh?.toFixed(2) ?? '—'}</span>
           </div>
@@ -3358,20 +3398,8 @@
           return `
         <div class="drawer-section">
           <div class="drawer-section-title">📊 Volume Signal</div>
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-            <span style="font-size:1.4rem">${icon}</span>
-            <span style="font-weight:600;color:${color}">${signal}</span>
-          </div>
-          <div style="font-size:0.75rem;color:var(--text-dim);margin-bottom:8px">${advice}</div>
-          <div class="stat-row">
-            <span class="stat-label">Price</span>
-            <span class="stat-value">${priceDir==='up' ? '↑ Rising' : '↓ Falling'}</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">Volume vs avg</span>
-            <span class="stat-value" style="color:${volDir==='up'?'var(--accent2)':'var(--text-dim)'}">
-              ${volDir==='up' ? '↑' : '↓'} ${volRatio}x
-            </span>
+          <div id="drawerVolSignal">
+            <div style="color:var(--muted);font-size:0.75rem">Loading chart data…</div>
           </div>
         </div>`;
         })()}
