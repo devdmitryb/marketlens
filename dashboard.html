@@ -3329,6 +3329,53 @@
           </div>
         </div>
 
+        <!-- Volume Signal -->
+        ${(() => {
+          const hist = chartCache[`${sym}_30`] || chartCache[`${sym}_90`] || chartCache[`${sym}_180`];
+          if (!hist || hist.length < 6) return '';
+          const recent = hist.slice(-6); // last 6 days
+          const last5  = recent.slice(-5);
+          // Average volume of days 1-4 (not counting today)
+          const avgVol  = last5.slice(0,4).reduce((s,d) => s + (d.volume||0), 0) / 4;
+          const todayVol = last5[last5.length-1]?.volume || 0;
+          const priceDir = last5[last5.length-1]?.close > last5[last5.length-2]?.close ? 'up' : 'down';
+          const volDir   = todayVol > avgVol ? 'up' : 'down';
+          let signal, icon, color, advice;
+          if (priceDir==='up' && volDir==='up') {
+            signal='Confirmed move'; icon='✅'; color='var(--accent2)';
+            advice='Price rising with volume — strong signal';
+          } else if (priceDir==='down' && volDir==='down') {
+            signal='Normal pullback'; icon='🟡'; color='var(--text-dim)';
+            advice='Price dipping on low volume — sellers not aggressive';
+          } else if (priceDir==='up' && volDir==='down') {
+            signal='Weak move'; icon='⚠️'; color='var(--warning, #f59e0b)';
+            advice='Price rising but low volume — watch for reversal';
+          } else {
+            signal='Selling pressure'; icon='🔴'; color='var(--danger)';
+            advice='Price falling on high volume — be careful';
+          }
+          const volRatio = avgVol > 0 ? (todayVol/avgVol).toFixed(1) : '?';
+          return `
+        <div class="drawer-section">
+          <div class="drawer-section-title">📊 Volume Signal</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <span style="font-size:1.4rem">${icon}</span>
+            <span style="font-weight:600;color:${color}">${signal}</span>
+          </div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-bottom:8px">${advice}</div>
+          <div class="stat-row">
+            <span class="stat-label">Price</span>
+            <span class="stat-value">${priceDir==='up' ? '↑ Rising' : '↓ Falling'}</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Volume vs avg</span>
+            <span class="stat-value" style="color:${volDir==='up'?'var(--accent2)':'var(--text-dim)'}">
+              ${volDir==='up' ? '↑' : '↓'} ${volRatio}x
+            </span>
+          </div>
+        </div>`;
+        })()}
+
         <!-- Target / Upside -->
         <div class="drawer-section">
           <div class="drawer-section-title">Analyst Price Targets</div>
