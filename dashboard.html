@@ -1657,6 +1657,15 @@
           style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.82rem;padding:5px 8px;border-radius:7px;outline:none;width:55px" />
         <span>%</span>
       </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:0.78rem;color:var(--text-dim)">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="bt-takeprofit" style="accent-color:var(--accent2)" />
+          Take profit
+        </label>
+        <input type="number" id="bt-takeprofit-pct" value="40" min="10" max="500" step="5"
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.82rem;padding:5px 8px;border-radius:7px;outline:none;width:55px" />
+        <span>%</span>
+      </div>
       <button class="btn" onclick="runBacktest()" id="bt-run-btn">🔬 Run Backtest</button>
       <button class="btn secondary" onclick="openScanList()" id="bt-scan-btn">📡 Scan List</button>
       <span id="bt-status" style="font-size:0.78rem;color:var(--text-dim)"></span>
@@ -4637,8 +4646,10 @@
   async function openScanList() {
     const positionSize = parseFloat(document.getElementById('bt-capital').value) || 200;
     const years        = parseInt(document.getElementById('bt-period').value) || 3;
-    const useStopLoss  = document.getElementById('bt-stoploss')?.checked;
-    const stopLossPct  = useStopLoss ? parseFloat(document.getElementById('bt-stoploss-pct').value) || 33 : null;
+    const useStopLoss   = document.getElementById('bt-stoploss')?.checked;
+    const stopLossPct   = useStopLoss   ? parseFloat(document.getElementById('bt-stoploss-pct').value)   || 33 : null;
+    const useTakeProfit = document.getElementById('bt-takeprofit')?.checked;
+    const takeProfitPct = useTakeProfit ? parseFloat(document.getElementById('bt-takeprofit-pct').value) || 40 : null;
 
     if (!API_KEY && !serverAvailable) { alert('Please save your API key first.'); return; }
 
@@ -4723,7 +4734,7 @@
           continue;
         }
 
-        const result = simulateStrategy(history, grades, target, positionSize, sym, stopLossPct);
+        const result = simulateStrategy(history, grades, target, positionSize, sym, stopLossPct, takeProfitPct);
         const bh     = calcBuyAndHold(history, positionSize);
 
         // Find best single trade
@@ -4783,7 +4794,7 @@
         ${avgReturn>=0?'+':''}${avgReturn.toFixed(1)}%
       </td>
       <td colspan="3" style="padding:10px 12px;color:var(--muted);font-size:0.72rem">
-        ${stopLossPct ? `Stop-loss: -${stopLossPct}%` : 'No stop-loss'}
+        ${stopLossPct ? `SL: -${stopLossPct}%` : 'No SL'} · ${takeProfitPct ? `TP: +${takeProfitPct}%` : 'No TP'}
       </td>`;
     tbody.appendChild(totalsRow);
 
@@ -4929,10 +4940,12 @@
 
       status.textContent = `Simulating ${history.length} trading days…`;
 
-      const useStopLoss = document.getElementById('bt-stoploss')?.checked;
-    const stopLossPct = useStopLoss ? parseFloat(document.getElementById('bt-stoploss-pct').value) || 33 : null;
+      const useStopLoss   = document.getElementById('bt-stoploss')?.checked;
+    const stopLossPct   = useStopLoss   ? parseFloat(document.getElementById('bt-stoploss-pct').value)   || 33  : null;
+    const useTakeProfit = document.getElementById('bt-takeprofit')?.checked;
+    const takeProfitPct = useTakeProfit ? parseFloat(document.getElementById('bt-takeprofit-pct').value) || 40  : null;
 
-    const result = simulateStrategy(history, grades, target, capital, sym, stopLossPct);
+    const result = simulateStrategy(history, grades, target, capital, sym, stopLossPct, takeProfitPct);
       const bh     = calcBuyAndHold(history, capital);
       const xbi    = calcBuyAndHold(xbiHist, capital);
       const spy    = calcBuyAndHold(spyHist, capital);
@@ -4954,7 +4967,7 @@
     btn.disabled = false; btn.textContent = '🔬 Run Backtest';
   }
 
-  function simulateStrategy(history, grades, target, positionSize, sym, stopLossPct = null) {
+  function simulateStrategy(history, grades, target, positionSize, sym, stopLossPct = null, takeProfitPct = null) {
     const COMM = 10;
     let cumulativePnl = 0;  // track total across all trades
     let shares = 0;
@@ -5082,12 +5095,17 @@
         const stopLossHit = stopLossPct && entryPrice &&
           ((entryPrice - price) / entryPrice * 100) >= stopLossPct;
 
-        const exitReason = stopLossHit ? `STOP-LOSS -${stopLossPct}%`
-          : shouldExit ? signal
-          : hitTarget ? 'HIT TARGET'
+        // Take profit check
+        const takeProfitHit = takeProfitPct && entryPrice &&
+          ((price - entryPrice) / entryPrice * 100) >= takeProfitPct;
+
+        const exitReason = stopLossHit     ? `STOP-LOSS -${stopLossPct}%`
+          : takeProfitHit  ? `TAKE PROFIT +${takeProfitPct}%`
+          : shouldExit     ? signal
+          : hitTarget      ? 'HIT TARGET'
           : nearTargetExit ? 'NEAR TARGET — EXIT'
           : analystsBearish ? 'ANALYSTS BEARISH'
-          : isLastDay ? 'Still Open'
+          : isLastDay      ? 'Still Open'
           : null;
 
         if (exitReason) {
