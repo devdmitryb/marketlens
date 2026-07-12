@@ -2,6 +2,7 @@
 const cron  = require('node-cron');
 const fmp   = require('./fmp');
 const store = require('./store');
+const db    = require('./db');
 
 // Is NYSE market open right now?
 function isMarketOpen() {
@@ -21,25 +22,44 @@ async function collectScreenerFeed() {
     const fresh = await fmp.getGradesLatestNews(100);
     if (!fresh.length) return;
 
-    // Merge with existing — deduplicate by newsURL
-    const existing = store.read('screener', []);
-    const existingUrls = new Set(existing.map(e => e.newsURL));
-    const newEntries   = fresh.filter(e => !existingUrls.has(e.newsURL));
+    try {
+      // Merge with existing — deduplicate by newsURL
+      const existing = await db.getScreener();
+      const existingUrls = new Set(existing.map(e => e.newsURL));
+      const newEntries   = fresh.filter(e => !existingUrls.has(e.newsURL));
 
-    if (newEntries.length > 0) {
-      // Keep entries newer than 90 days
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - 90);
-      const filtered = [...newEntries, ...existing].filter(e =>
-        new Date(e.publishedDate) >= cutoff
-      );
-      store.write('screener', filtered);
-      console.log(`[cron] Screener: +${newEntries.length} new, total: ${filtered.length} (90d window)`);
-    } else {
-      console.log('[cron] Screener: no new entries');
+      if (newEntries.length > 0) {
+        for (const entry of newEntries) {
+          await db.saveScreenerEntry(entry);
+        }
+      }
+
+      const all = await db.getScreener();
+      store.write('screener_meta', { lastUpdated: new Date().toISOString(), count: all.length });
+      console.log(`[cron] Screener: +${newEntries.length} new, total: ${all.length} (90d window)`);
+    } catch(dbErr) {
+      console.error('[db] Screener update failed, falling back to store:', dbErr.message);
+
+      // Merge with existing — deduplicate by newsURL
+      const existing = store.read('screener', []);
+      const existingUrls = new Set(existing.map(e => e.newsURL));
+      const newEntries   = fresh.filter(e => !existingUrls.has(e.newsURL));
+
+      if (newEntries.length > 0) {
+        // Keep entries newer than 90 days
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 90);
+        const filtered = [...newEntries, ...existing].filter(e =>
+          new Date(e.publishedDate) >= cutoff
+        );
+        store.write('screener', filtered);
+        console.log(`[cron] Screener (fallback): +${newEntries.length} new, total: ${filtered.length} (90d window)`);
+      } else {
+        console.log('[cron] Screener (fallback): no new entries');
+      }
+
+      store.write('screener_meta', { lastUpdated: new Date().toISOString(), count: store.read('screener', []).length });
     }
-
-    store.write('screener_meta', { lastUpdated: new Date().toISOString(), count: store.read('screener', []).length });
   } catch(e) {
     console.error('[cron] Screener error:', e.message);
   }
@@ -48,9 +68,20 @@ async function collectScreenerFeed() {
 // ── JOB 2: Quote + signal refresh for watched symbols ────────────
 async function refreshWatchedSymbols() {
   console.log('[cron] Refreshing watched symbols…');
-  const watchlist = store.read('watchlist', []);
-  const portfolio = store.read('portfolio', { open: [], closed: [] });
-  const practice  = store.read('practice', []);
+
+  let watchlist, portfolio, practice;
+  try {
+    [watchlist, portfolio, practice] = await Promise.all([
+      db.getWatchlist(),
+      db.getPortfolio(),
+      db.getPractice(),
+    ]);
+  } catch(e) {
+    console.error('[db] Failed to load watchlist/portfolio/practice, falling back to store:', e.message);
+    watchlist = store.read('watchlist', []);
+    portfolio = store.read('portfolio', { open: [], closed: [] });
+    practice  = store.read('practice', []);
+  }
 
   // All symbols that need monitoring — watchlist + open portfolio + open practice
   const portfolioSyms = (portfolio.open || []).map(p => p.sym);
@@ -59,10 +90,14 @@ async function refreshWatchedSymbols() {
 
   if (!allSyms.length) return;
 
-  const quotes   = store.read('quotes', {});
-  const signals  = store.read('signals', {});
-  const gradeCache  = store.read('grades_cache', {});
-  const targetCache = store.read('target_cache', {});
+  let signals;
+  try {
+    signals = await db.getSignals();
+  } catch(e) {
+    console.error('[db] getSignals failed, falling back to store:', e.message);
+    signals = store.read('signals', {});
+  }
+
   const changed  = [];
   const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
@@ -70,20 +105,62 @@ async function refreshWatchedSymbols() {
     try {
       // Check cache for grades and target
       const now = Date.now();
-      const gradesFresh  = gradeCache[sym]  && (now - new Date(gradeCache[sym].cachedAt).getTime())  < CACHE_TTL;
-      const targetFresh  = targetCache[sym] && (now - new Date(targetCache[sym].cachedAt).getTime()) < CACHE_TTL;
+
+      let cachedGrades, cachedTarget;
+      try {
+        [cachedGrades, cachedTarget] = await Promise.all([
+          db.getCachedGrades(sym),
+          db.getCachedTarget(sym),
+        ]);
+      } catch(e) {
+        console.error(`[db] Cache lookup failed for ${sym}, falling back to store:`, e.message);
+        const gradeCache  = store.read('grades_cache', {});
+        const targetCache = store.read('target_cache', {});
+        cachedGrades = gradeCache[sym]  || null;
+        cachedTarget = targetCache[sym] || null;
+      }
+
+      const gradesFresh  = cachedGrades && (now - new Date(cachedGrades.cachedAt).getTime()) < CACHE_TTL;
+      const targetFresh  = cachedTarget && (now - new Date(cachedTarget.cachedAt).getTime()) < CACHE_TTL;
 
       const [quote, grades, target] = await Promise.all([
         fmp.getQuote(sym),
-        gradesFresh  ? Promise.resolve(gradeCache[sym].data)  : fmp.getGrades(sym),
-        targetFresh  ? Promise.resolve(targetCache[sym].data) : fmp.getTarget(sym),
+        gradesFresh  ? Promise.resolve(cachedGrades.data)  : fmp.getGrades(sym),
+        targetFresh  ? Promise.resolve(cachedTarget.data) : fmp.getTarget(sym),
       ]);
 
       // Update caches
-      if (!gradesFresh  && grades)  gradeCache[sym]  = { data: grades,  cachedAt: new Date().toISOString() };
-      if (!targetFresh  && target)  targetCache[sym] = { data: target,  cachedAt: new Date().toISOString() };
+      if (!gradesFresh && grades) {
+        try {
+          await db.setCachedGrades(sym, grades);
+        } catch(e) {
+          console.error(`[db] setCachedGrades failed for ${sym}, falling back to store:`, e.message);
+          const gradeCache = store.read('grades_cache', {});
+          gradeCache[sym] = { data: grades, cachedAt: new Date().toISOString() };
+          store.write('grades_cache', gradeCache);
+        }
+      }
+      if (!targetFresh && target) {
+        try {
+          await db.setCachedTarget(sym, target);
+        } catch(e) {
+          console.error(`[db] setCachedTarget failed for ${sym}, falling back to store:`, e.message);
+          const targetCache = store.read('target_cache', {});
+          targetCache[sym] = { data: target, cachedAt: new Date().toISOString() };
+          store.write('target_cache', targetCache);
+        }
+      }
 
-      if (quote) quotes[sym] = { ...quote, cachedAt: new Date().toISOString() };
+      if (quote) {
+        try {
+          await db.setCachedQuote(sym, quote);
+        } catch(e) {
+          console.error(`[db] setCachedQuote failed for ${sym}, falling back to store:`, e.message);
+          const quotes = store.read('quotes', {});
+          quotes[sym] = { ...quote, cachedAt: new Date().toISOString() };
+          store.write('quotes', quotes);
+        }
+      }
 
       // Calculate signal
       const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 90);
@@ -103,7 +180,7 @@ async function refreshWatchedSymbols() {
       const prevSignal = signals[sym]?.signal;
       const newSignal  = calcSimpleSignal(tally, upside);
 
-      signals[sym] = {
+      const signalData = {
         signal: newSignal,
         upside,
         tally,
@@ -111,12 +188,22 @@ async function refreshWatchedSymbols() {
         target: target?.targetConsensus,
         updatedAt: new Date().toISOString(),
       };
+      signals[sym] = signalData;
+
+      try {
+        await db.saveSignal(sym, signalData);
+      } catch(e) {
+        console.error(`[db] saveSignal failed for ${sym}, falling back to store:`, e.message);
+        const storeSignals = store.read('signals', {});
+        storeSignals[sym] = signalData;
+        store.write('signals', storeSignals);
+      }
 
       // Log signal change
       if (prevSignal && prevSignal !== newSignal) {
         changed.push({ sym, from: prevSignal, to: newSignal, upside });
         console.log(`[cron] Signal change: ${sym} ${prevSignal} → ${newSignal}`);
-        logSignalChange(sym, newSignal, prevSignal, upside);
+        await logSignalChange(sym, newSignal, prevSignal, upside);
 
         const inPortfolio = portfolioSyms.includes(sym);
         const inPractice  = practiceSyms.includes(sym);
@@ -139,10 +226,6 @@ async function refreshWatchedSymbols() {
     }
   }
 
-  store.write('quotes', quotes);
-  store.write('signals', signals);
-  store.write('grades_cache', gradeCache);
-  store.write('target_cache', targetCache);
   console.log(`[cron] Refreshed ${allSyms.length} symbols (${watchlist.length} watchlist + ${portfolioSyms.length} portfolio + ${practiceSyms.length} practice), ${changed.length} signal changes`);
 }
 
@@ -150,14 +233,26 @@ async function refreshWatchedSymbols() {
 // Runs once per day at night — enrich all screener symbols with upside %
 async function enrichScreenerUpside() {
   console.log('[cron] Enriching screener upside…');
-  const screener = store.read('screener', []);
-  const syms     = [...new Set(screener.map(e => e.symbol))];
-  const upside   = store.read('screener_upside', {});
 
+  let entries;
+  try {
+    entries = await db.getScreener();
+  } catch(e) {
+    console.error('[db] getScreener failed, falling back to store:', e.message);
+    const screener   = store.read('screener', []);
+    const storeUpside = store.read('screener_upside', {});
+    entries = screener.map(x => ({ ...x, upsideData: storeUpside[x.symbol] || null }));
+  }
+
+  const syms = [...new Set(entries.map(e => e.symbol))];
+  const upsideMap = {};
+  entries.forEach(e => { if (e.upsideData && !upsideMap[e.symbol]) upsideMap[e.symbol] = e.upsideData; });
+
+  let enrichedCount = 0;
   for (const sym of syms) {
-    if (upside[sym]?.cachedAt) {
-      const age = Date.now() - new Date(upside[sym].cachedAt).getTime();
-      if (age < 24 * 60 * 60 * 1000) continue; // skip if fresh
+    if (upsideMap[sym]?.cachedAt) {
+      const age = Date.now() - new Date(upsideMap[sym].cachedAt).getTime();
+      if (age < 24 * 60 * 60 * 1000) { enrichedCount++; continue; } // skip if fresh
     }
     try {
       const [quote, target] = await Promise.all([
@@ -165,18 +260,26 @@ async function enrichScreenerUpside() {
         fmp.getTarget(sym),
       ]);
       if (quote?.price && target?.targetConsensus) {
-        upside[sym] = {
+        const data = {
           upside: ((target.targetConsensus - quote.price) / quote.price * 100),
           price: quote.price,
           target: target.targetConsensus,
           cachedAt: new Date().toISOString(),
         };
+        try {
+          await db.updateScreenerUpside(sym, data);
+        } catch(e) {
+          console.error(`[db] updateScreenerUpside failed for ${sym}, falling back to store:`, e.message);
+          const storeUpside = store.read('screener_upside', {});
+          storeUpside[sym] = data;
+          store.write('screener_upside', storeUpside);
+        }
+        enrichedCount++;
       }
       await sleep(200);
     } catch {}
   }
-  store.write('screener_upside', upside);
-  console.log(`[cron] Enriched ${Object.keys(upside).length} symbols`);
+  console.log(`[cron] Enriched ${enrichedCount} symbols`);
 }
 
 // ── EMAIL ALERTS ─────────────────────────────────────────────────
@@ -235,18 +338,24 @@ function calcSimpleSignal(tally, upsidePct) {
   return 'WATCH';
 }
 
-function logSignalChange(sym, newSignal, oldSignal, upside) {
-  const log = store.read('signal_log', []);
-  log.unshift({
-    id:        Date.now(),
-    ts:        new Date().toISOString(),
-    sym,
-    newSignal,
-    oldSignal,
-    reason:    `Upside: ${upside?.toFixed(1)}%`,
-    source:    'server',
-  });
-  store.write('signal_log', log.slice(0, 500)); // keep last 500
+async function logSignalChange(sym, newSignal, oldSignal, upside) {
+  const reason = `Upside: ${upside?.toFixed(1)}%`;
+  try {
+    await db.addSignalLog(sym, newSignal, oldSignal, reason);
+  } catch(e) {
+    console.error(`[db] addSignalLog failed for ${sym}, falling back to store:`, e.message);
+    const log = store.read('signal_log', []);
+    log.unshift({
+      id:        Date.now(),
+      ts:        new Date().toISOString(),
+      sym,
+      newSignal,
+      oldSignal,
+      reason,
+      source:    'server',
+    });
+    store.write('signal_log', log.slice(0, 500)); // keep last 500
+  }
 }
 
 // ── SCHEDULE ─────────────────────────────────────────────────────
