@@ -3,6 +3,7 @@ const express = require('express');
 const cors    = require('cors');
 const path    = require('path');
 const store   = require('./store');
+const db      = require('./db');
 const fmp     = require('./fmp');
 const { startCronJobs } = require('./cron');
 
@@ -84,15 +85,21 @@ app.get('/api/health', (req, res) => {
 });
 
 // Screener feed (cached, no FMP call)
-app.get('/api/screener', auth, (req, res) => {
-  const data   = store.read('screener', []);
-  const upside = store.read('screener_upside', {});
-  // Attach upside to each entry
-  const enriched = data.map(e => ({
-    ...e,
-    upsideData: upside[e.symbol] || null,
-  }));
-  res.json(enriched);
+app.get('/api/screener', auth, async (req, res) => {
+  try {
+    const data = await db.getScreener();
+    res.json(data);
+  } catch(e) {
+    console.error('[db] getScreener failed, falling back to store:', e.message);
+    const data   = store.read('screener', []);
+    const upside = store.read('screener_upside', {});
+    // Attach upside to each entry
+    const enriched = data.map(x => ({
+      ...x,
+      upsideData: upside[x.symbol] || null,
+    }));
+    res.json(enriched);
+  }
 });
 
 // Quote — serve from cache, refresh if stale
@@ -171,50 +178,95 @@ app.get('/api/earnings/:sym', auth, async (req, res) => {
 });
 
 // Signals (cached)
-app.get('/api/signals', auth, (req, res) => {
-  res.json(store.read('signals', {}));
+app.get('/api/signals', auth, async (req, res) => {
+  try {
+    const data = await db.getSignals();
+    res.json(data);
+  } catch(e) {
+    console.error('[db] getSignals failed, falling back to store:', e.message);
+    res.json(store.read('signals', {}));
+  }
 });
 
 // Signal log (cached)
-app.get('/api/signal-log', auth, (req, res) => {
+app.get('/api/signal-log', auth, async (req, res) => {
   const limit = parseInt(req.query.limit) || 200;
-  const log   = store.read('signal_log', []);
-  res.json(log.slice(0, limit));
+  try {
+    const log = await db.getSignalLog(limit);
+    res.json(log);
+  } catch(e) {
+    console.error('[db] getSignalLog failed, falling back to store:', e.message);
+    const log = store.read('signal_log', []);
+    res.json(log.slice(0, limit));
+  }
 });
 
 // Watchlist — read/write from server (shared across devices!)
-app.get('/api/watchlist', auth, (req, res) => {
-  res.json(store.read('watchlist', []));
+app.get('/api/watchlist', auth, async (req, res) => {
+  try {
+    const data = await db.getWatchlist();
+    res.json(data);
+  } catch(e) {
+    console.error('[db] getWatchlist failed, falling back to store:', e.message);
+    res.json(store.read('watchlist', []));
+  }
 });
 
-app.post('/api/watchlist', auth, (req, res) => {
+app.post('/api/watchlist', auth, async (req, res) => {
   const { symbols } = req.body;
   if (!Array.isArray(symbols)) return res.status(400).json({ error: 'symbols must be array' });
-  store.write('watchlist', symbols);
+  try {
+    await db.saveWatchlist(symbols);
+  } catch(e) {
+    console.error('[db] saveWatchlist failed, falling back to store:', e.message);
+    store.write('watchlist', symbols);
+  }
   res.json({ ok: true, symbols });
 });
 
 // Practice accounts — sync across devices
-app.get('/api/practice', auth, (req, res) => {
-  res.json(store.read('practice', []));
+app.get('/api/practice', auth, async (req, res) => {
+  try {
+    const data = await db.getPractice();
+    res.json(data);
+  } catch(e) {
+    console.error('[db] getPractice failed, falling back to store:', e.message);
+    res.json(store.read('practice', []));
+  }
 });
 
-app.post('/api/practice', auth, (req, res) => {
+app.post('/api/practice', auth, async (req, res) => {
   const { accounts } = req.body;
   if (!Array.isArray(accounts)) return res.status(400).json({ error: 'accounts must be array' });
-  store.write('practice', accounts);
+  try {
+    await db.savePractice(accounts);
+  } catch(e) {
+    console.error('[db] savePractice failed, falling back to store:', e.message);
+    store.write('practice', accounts);
+  }
   res.json({ ok: true });
 });
 
 // Portfolio — sync across devices
-app.get('/api/portfolio', auth, (req, res) => {
-  res.json(store.read('portfolio', { open: [], closed: [] }));
+app.get('/api/portfolio', auth, async (req, res) => {
+  try {
+    const data = await db.getPortfolio();
+    res.json(data);
+  } catch(e) {
+    console.error('[db] getPortfolio failed, falling back to store:', e.message);
+    res.json(store.read('portfolio', { open: [], closed: [] }));
+  }
 });
 
-app.post('/api/portfolio', auth, (req, res) => {
+app.post('/api/portfolio', auth, async (req, res) => {
   const data = req.body;
   if (!data) return res.status(400).json({ error: 'No data' });
-  store.write('portfolio', data);
+  try {
+    await db.savePortfolio(data);
+  } catch(e) {
+    console.error('[db] savePortfolio failed, falling back to store:', e.message);
+    store.write('portfolio', data);
+  }
   res.json({ ok: true });
 });
 
@@ -237,9 +289,19 @@ function isMarketOpen() {
 }
 
 // ── Start ─────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n🚀 MarketLens server running on port ${PORT}`);
-  console.log(`   Dashboard: http://localhost:${PORT}/dashboard.html`);
-  console.log(`   API:       http://localhost:${PORT}/api/health\n`);
-  startCronJobs();
-});
+async function start() {
+  try {
+    await db.initSchema();
+  } catch(e) {
+    console.error('[db] initSchema failed, continuing with store.js fallback:', e.message);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`\n🚀 MarketLens server running on port ${PORT}`);
+    console.log(`   Dashboard: http://localhost:${PORT}/dashboard.html`);
+    console.log(`   API:       http://localhost:${PORT}/api/health\n`);
+    startCronJobs();
+  });
+}
+
+start();
