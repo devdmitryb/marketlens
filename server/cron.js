@@ -300,14 +300,9 @@ Upside:      ${upside?.toFixed(1)}%
 Open MarketLens: https://marketlens-bt5u.onrender.com
   `.trim();
 
-  // Send via Gmail SMTP using raw HTTP (no nodemailer needed)
-  const https  = require('https');
-  const auth   = Buffer.from(`${user}:${pass}`).toString('base64');
-
-  // Use Gmail API via SMTP - simpler: just use nodemailer
   try {
-    const nodemailer = require('nodemailer');
-    const transporter = nodemailer.createTransporter({
+    const nodemailer  = require('nodemailer');
+    const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: { user, pass },
     });
