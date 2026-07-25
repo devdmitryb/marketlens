@@ -3662,9 +3662,9 @@
         <div style="width:100%">
           ${existingSummaryHtml}
           <div style="display:flex;gap:8px">
-            ${inWatch
-              ? `<button class="btn secondary" style="flex:1;opacity:0.5;cursor:default">✓ In Watchlist</button>`
-              : `<button class="btn secondary" style="flex:1" onclick="addFromDrawer('${sym}')">+ Add to Watchlist</button>`}
+            <button id="drawerWatchBtn" class="btn secondary" style="flex:1" onclick="toggleWatchlistFromDrawer('${sym}')">
+              ${inWatch ? '✓ In Watchlist' : '+ Add to Watchlist'}
+            </button>
             <button class="btn" style="flex:1;background:var(--accent2);color:#0a0a0f"
               onclick="openPracticeBuyFromDrawer('${sym}', ${curPrice}, \`${autoNote.replace(/`/g,"'")}\`)">
               🎮 Practice Buy
@@ -3680,14 +3680,19 @@
     }
   }
 
-  function addFromDrawer(sym) {
-    if (!watchlist.includes(sym)) {
+  function toggleWatchlistFromDrawer(sym) {
+    if (watchlist.includes(sym)) {
+      watchlist = watchlist.filter(s => s !== sym);
+      delete stockData[sym];
+      saveWatchlist();
+      renderAll();
+    } else {
       watchlist.push(sym);
       saveWatchlist();
       fetchAndRender(sym);
     }
-    document.getElementById('drawerActions').innerHTML =
-      `<button class="btn secondary" style="flex:1;opacity:0.5;cursor:default">✓ In Watchlist</button>`;
+    const btn = document.getElementById('drawerWatchBtn');
+    if (btn) btn.textContent = watchlist.includes(sym) ? '✓ In Watchlist' : '+ Add to Watchlist';
   }
 
   // ══════════════════════════════════════════
