@@ -2108,6 +2108,12 @@
     if (name === 'admin') {
       loadAdminUsers();
     }
+    if (name === 'screener' && !screenerData.length && (API_KEY || serverAvailable)) {
+      loadScreener();
+    }
+    if (name === 'overview' && !overviewLoaded && (API_KEY || serverAvailable)) {
+      loadOverview();
+    }
   }
 
   // ══════════════════════════════════════════
@@ -4081,6 +4087,7 @@
     sectors:    ['XBI', 'XPH', 'XLV', 'IWM'],
     commodities:['USO', 'GLD', 'UUP'],   // UUP = USD index
   };
+  let overviewLoaded = false;
 
   function isMarketOpen() {
     const now = new Date();
@@ -4185,6 +4192,7 @@
       if (cached) {
         renderOverviewData(cached);
         updateStatusIndicator(isMarketOpen() ? 'cached' : 'closed');
+        overviewLoaded = true;
         return;
       }
     }
@@ -4208,6 +4216,7 @@
     cacheSet('overview_data', bySymbol);
     renderOverviewData(bySymbol);
     updateStatusIndicator(isMarketOpen() ? 'live' : 'closed');
+    overviewLoaded = true;
   }
 
   function renderOverviewData(bySymbol) {
@@ -5654,8 +5663,10 @@
         }
       } catch(e) { console.warn('Could not load from server:', e.message); }
     }
-    if (API_KEY) {
+    if (API_KEY || serverAvailable) {
       loadOverview();
+    }
+    if (API_KEY) {
       if (watchlist.length > 0) refreshAll();
       refreshPortfolioPrices();
       setTimeout(() => {
