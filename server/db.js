@@ -1,5 +1,6 @@
 // PostgreSQL connection via Supabase
-const { Pool } = require('pg');
+const { Pool }  = require('pg');
+const bcrypt    = require('bcrypt');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -18,6 +19,17 @@ async function initSchema() {
   const client = await pool.connect();
   try {
     await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id            SERIAL PRIMARY KEY,
+        username      TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        display_name  TEXT,
+        email         TEXT,
+        role          TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+        created_at    TIMESTAMPTZ DEFAULT NOW(),
+        last_active   TIMESTAMPTZ
+      );
+
       CREATE TABLE IF NOT EXISTS watchlist (
         id         SERIAL PRIMARY KEY,
         symbol     TEXT NOT NULL UNIQUE,
@@ -81,29 +93,122 @@ async function initSchema() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
+
+    await migrateToMultiUser(client);
+
     console.log('[db] Schema ready ✅');
   } finally {
     client.release();
   }
 }
 
+// ── Multiuser migration: add user_id, backfill onto a bootstrap admin ──
+async function migrateToMultiUser(client) {
+  try {
+    await client.query('BEGIN');
+
+    await client.query('ALTER TABLE watchlist ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
+    await client.query('ALTER TABLE portfolio ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
+    await client.query('ALTER TABLE practice  ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
+
+    // Symbols are now scoped per user, not global
+    await client.query('ALTER TABLE watchlist DROP CONSTRAINT IF EXISTS watchlist_symbol_key');
+
+    // Bootstrap admin user from APP_PASSWORD (only if no users exist yet)
+    const { rows: userCountRows } = await client.query('SELECT COUNT(*)::int AS count FROM users');
+    let adminId = null;
+
+    if (userCountRows[0].count === 0) {
+      if (process.env.APP_PASSWORD) {
+        const passwordHash = await bcrypt.hash(process.env.APP_PASSWORD, 10);
+        const { rows } = await client.query(
+          `INSERT INTO users (username, password_hash, display_name, role)
+           VALUES ($1, $2, $3, 'admin') RETURNING id`,
+          [process.env.ADMIN_USERNAME || 'admin', passwordHash, 'Admin']
+        );
+        adminId = rows[0].id;
+        console.log(`[db] Bootstrapped admin user '${process.env.ADMIN_USERNAME || 'admin'}' (id=${adminId})`);
+      } else {
+        console.warn('[db] APP_PASSWORD not set — skipping admin bootstrap; user_id backfill deferred to next startup');
+      }
+    } else {
+      const { rows } = await client.query(`SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1`);
+      adminId = rows[0]?.id ?? null;
+    }
+
+    if (adminId) {
+      await client.query('UPDATE watchlist SET user_id = $1 WHERE user_id IS NULL', [adminId]);
+      await client.query('UPDATE portfolio SET user_id = $1 WHERE user_id IS NULL', [adminId]);
+      await client.query('UPDATE practice  SET user_id = $1 WHERE user_id IS NULL', [adminId]);
+    }
+
+    // Only enforce NOT NULL + uniqueness once every row is backfilled —
+    // otherwise leave nullable and self-heal on a later startup
+    const { rows: nullCheckRows } = await client.query(`
+      SELECT
+        (SELECT COUNT(*) FROM watchlist WHERE user_id IS NULL)::int AS watchlist,
+        (SELECT COUNT(*) FROM portfolio WHERE user_id IS NULL)::int AS portfolio,
+        (SELECT COUNT(*) FROM practice  WHERE user_id IS NULL)::int AS practice
+    `);
+    const nulls = nullCheckRows[0];
+
+    if (nulls.watchlist === 0) {
+      await client.query('ALTER TABLE watchlist ALTER COLUMN user_id SET NOT NULL');
+      await client.query('CREATE UNIQUE INDEX IF NOT EXISTS watchlist_user_symbol_idx ON watchlist(user_id, symbol)');
+    } else {
+      console.warn(`[db] watchlist: ${nulls.watchlist} row(s) missing user_id — deferring NOT NULL/index`);
+    }
+
+    if (nulls.portfolio === 0) {
+      await client.query('ALTER TABLE portfolio ALTER COLUMN user_id SET NOT NULL');
+      await client.query('CREATE UNIQUE INDEX IF NOT EXISTS portfolio_user_idx ON portfolio(user_id)');
+    } else {
+      console.warn(`[db] portfolio: ${nulls.portfolio} row(s) missing user_id — deferring NOT NULL/index`);
+    }
+
+    if (nulls.practice === 0) {
+      await client.query('ALTER TABLE practice ALTER COLUMN user_id SET NOT NULL');
+      await client.query('CREATE UNIQUE INDEX IF NOT EXISTS practice_user_idx ON practice(user_id)');
+    } else {
+      console.warn(`[db] practice: ${nulls.practice} row(s) missing user_id — deferring NOT NULL/index`);
+    }
+
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  }
+}
+
 // ── Helper functions ──────────────────────────────────────────────
 
+// Resolves the implicit user for callers that don't pass userId yet
+// (Phase 1: no JWT wiring, so index.js/cron.js keep calling these unchanged)
+let cachedAdminId = null;
+async function getDefaultUserId() {
+  if (cachedAdminId) return cachedAdminId;
+  const res = await pool.query(`SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1`);
+  cachedAdminId = res.rows[0]?.id ?? null;
+  return cachedAdminId;
+}
+
 // Watchlist
-async function getWatchlist() {
-  const res = await pool.query('SELECT symbol FROM watchlist ORDER BY added_at');
+async function getWatchlist(userId) {
+  const uid = userId ?? await getDefaultUserId();
+  const res = await pool.query('SELECT symbol FROM watchlist WHERE user_id = $1 ORDER BY added_at', [uid]);
   return res.rows.map(r => r.symbol);
 }
 
-async function saveWatchlist(symbols) {
+async function saveWatchlist(symbols, userId) {
+  const uid = userId ?? await getDefaultUserId();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('DELETE FROM watchlist');
+    await client.query('DELETE FROM watchlist WHERE user_id = $1', [uid]);
     for (const sym of symbols) {
       await client.query(
-        'INSERT INTO watchlist (symbol) VALUES ($1) ON CONFLICT (symbol) DO NOTHING',
-        [sym]
+        'INSERT INTO watchlist (user_id, symbol) VALUES ($1, $2) ON CONFLICT (user_id, symbol) DO NOTHING',
+        [uid, sym]
       );
     }
     await client.query('COMMIT');
@@ -115,30 +220,74 @@ async function saveWatchlist(symbols) {
   }
 }
 
-// Portfolio (stored as single JSON blob)
-async function getPortfolio() {
-  const res = await pool.query('SELECT data FROM portfolio LIMIT 1');
+// Portfolio (stored as single JSON blob per user)
+async function getPortfolio(userId) {
+  const uid = userId ?? await getDefaultUserId();
+  const res = await pool.query('SELECT data FROM portfolio WHERE user_id = $1', [uid]);
   return res.rows[0]?.data || { open: [], closed: [] };
 }
 
-async function savePortfolio(data) {
+async function savePortfolio(data, userId) {
+  const uid = userId ?? await getDefaultUserId();
   await pool.query(`
-    INSERT INTO portfolio (id, data, updated_at) VALUES (1, $1, NOW())
-    ON CONFLICT (id) DO UPDATE SET data = $1, updated_at = NOW()
-  `, [JSON.stringify(data)]);
+    INSERT INTO portfolio (user_id, data, updated_at) VALUES ($1, $2, NOW())
+    ON CONFLICT (user_id) DO UPDATE SET data = $2, updated_at = NOW()
+  `, [uid, JSON.stringify(data)]);
 }
 
-// Practice (stored as single JSON blob)
-async function getPractice() {
-  const res = await pool.query('SELECT data FROM practice LIMIT 1');
+// Practice (stored as single JSON blob per user)
+async function getPractice(userId) {
+  const uid = userId ?? await getDefaultUserId();
+  const res = await pool.query('SELECT data FROM practice WHERE user_id = $1', [uid]);
   return res.rows[0]?.data || [];
 }
 
-async function savePractice(accounts) {
+async function savePractice(accounts, userId) {
+  const uid = userId ?? await getDefaultUserId();
   await pool.query(`
-    INSERT INTO practice (id, data, updated_at) VALUES (1, $1, NOW())
-    ON CONFLICT (id) DO UPDATE SET data = $1, updated_at = NOW()
-  `, [JSON.stringify(accounts)]);
+    INSERT INTO practice (user_id, data, updated_at) VALUES ($1, $2, NOW())
+    ON CONFLICT (user_id) DO UPDATE SET data = $2, updated_at = NOW()
+  `, [uid, JSON.stringify(accounts)]);
+}
+
+// Users
+async function getUserByUsername(username) {
+  const res = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+  return res.rows[0] || null;
+}
+
+async function getUserById(id) {
+  const res = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+  return res.rows[0] || null;
+}
+
+async function getUsers() {
+  const res = await pool.query(
+    'SELECT id, username, display_name, email, role, created_at, last_active FROM users ORDER BY created_at'
+  );
+  return res.rows;
+}
+
+async function createUser({ username, passwordHash, displayName, email, role = 'member' }) {
+  const res = await pool.query(
+    `INSERT INTO users (username, password_hash, display_name, email, role)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, username, display_name, email, role, created_at`,
+    [username, passwordHash, displayName || null, email || null, role]
+  );
+  return res.rows[0];
+}
+
+async function deleteUser(id) {
+  await pool.query('DELETE FROM users WHERE id = $1', [id]);
+}
+
+async function updateUserPassword(id, passwordHash) {
+  await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, id]);
+}
+
+async function touchLastActive(id) {
+  await pool.query('UPDATE users SET last_active = NOW() WHERE id = $1', [id]);
 }
 
 // Signals
@@ -256,6 +405,8 @@ module.exports = {
   getWatchlist, saveWatchlist,
   getPortfolio, savePortfolio,
   getPractice,  savePractice,
+  getUserByUsername, getUserById, getUsers,
+  createUser, deleteUser, updateUserPassword, touchLastActive,
   getSignals,   saveSignal,
   getSignalLog, addSignalLog,
   getScreener,  saveScreenerEntry, updateScreenerUpside,
