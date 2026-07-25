@@ -209,12 +209,12 @@ async function refreshWatchedSymbols() {
         const inPractice  = practiceSyms.includes(sym);
         const inWatchlist = watchlist.includes(sym);
 
-        // Email: BUY-CONFIRMED for watchlist (not already in portfolio/practice)
-        if (inWatchlist && !inPortfolio && !inPractice && newSignal === 'BUY — CONFIRMED') {
+        // Email: BUY for watchlist (not already in portfolio/practice)
+        if (inWatchlist && !inPortfolio && !inPractice && newSignal === 'BUY') {
           await sendEmailAlert(sym, newSignal, prevSignal, upside, '🟢 Time to BUY!');
         }
         // Email: SELL signals for portfolio and practice
-        if ((inPortfolio || inPractice) && isCriticalSignal(newSignal)) {
+        if ((inPortfolio || inPractice) && newSignal === 'SELL') {
           await sendEmailAlert(sym, newSignal, prevSignal, upside, '🔴 Time to SELL!');
         }
       }
