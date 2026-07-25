@@ -515,6 +515,18 @@
       color: var(--accent2);
       cursor: default;
     }
+    .skip-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      padding: 5px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .skip-btn:hover { border-color: var(--danger); color: var(--danger); }
 
     /* ── PORTFOLIO ── */
     .portfolio-summary {
@@ -1531,6 +1543,7 @@
           <span id="thresholdLabel" style="font-family:var(--mono);color:var(--accent);min-width:36px">20%</span>
         </label>
         <button class="btn secondary" id="enrichBtn" onclick="enrichAll()">✦ Enrich All</button>
+        <button class="btn secondary" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Show Hidden</button>
         <button class="btn secondary" onclick="loadScreener()">↻ Refresh</button>
       </div>
     </div>
@@ -2832,6 +2845,46 @@
   let screenerFilter = 'all';
   let screenerUpside = {}; // symbol -> upside %
   let lastVisitTime = parseInt(localStorage.getItem('screener_last_visit') || '0');
+  let showHiddenScreener = false;
+
+  // ── "Not Interested" — skip a symbol on Screener for a growing cooldown period
+  function loadSkipped() {
+    try { return JSON.parse(localStorage.getItem('screener_skipped') || '{}'); }
+    catch { return {}; }
+  }
+
+  function saveSkipped(skipped) {
+    localStorage.setItem('screener_skipped', JSON.stringify(skipped));
+  }
+
+  function skipSymbol(sym) {
+    const skipped = loadSkipped();
+    const count = (skipped[sym]?.count || 0) + 1;
+    const months = 6 * Math.pow(2, count - 1); // 6, 12, 24, 48…
+    const until = new Date();
+    until.setMonth(until.getMonth() + months);
+    skipped[sym] = { count, until: until.toISOString().slice(0, 10) };
+    saveSkipped(skipped);
+    renderScreener();
+  }
+
+  function restoreSymbol(sym) {
+    const skipped = loadSkipped();
+    delete skipped[sym];
+    saveSkipped(skipped);
+    renderScreener();
+  }
+
+  function toggleShowHidden() {
+    showHiddenScreener = !showHiddenScreener;
+    const btn = document.getElementById('showHiddenBtn');
+    if (btn) {
+      btn.textContent = showHiddenScreener ? '👁 Hide Skipped' : '👁 Show Hidden';
+      btn.style.borderColor = showHiddenScreener ? 'var(--accent)' : '';
+      btn.style.color       = showHiddenScreener ? 'var(--accent)' : '';
+    }
+    renderScreener();
+  }
 
   function updateThresholdLabel(v) {
     document.getElementById('thresholdLabel').textContent = v + '%';
@@ -2957,6 +3010,14 @@
     // Filter out ADR symbols (5 letters ending in Y or F) and OTC pink sheets
     const isADR = sym => /^[A-Z]{4,5}[YF]$/.test(sym) || sym.includes('.');
     rows = rows.filter(item => !isADR(item.symbol));
+
+    // "Not Interested" — hide skipped symbols unless "Show Hidden" is toggled on
+    const skipped = loadSkipped();
+    const today   = new Date().toISOString().slice(0, 10);
+    if (!showHiddenScreener) {
+      rows = rows.filter(item => !(skipped[item.symbol] && skipped[item.symbol].until > today));
+    }
+
     rows.forEach((item, i) => {
       const isNew = new Date(item.publishedDate).getTime() > lastVisitTime;
       const upside = screenerUpside.hasOwnProperty(item.symbol) ? screenerUpside[item.symbol] : undefined;
@@ -2994,6 +3055,9 @@
         : '—';
 
       const inWatch = watchlist.includes(item.symbol);
+      const skipInfo  = skipped[item.symbol];
+      const isSkipped = !!(skipInfo && skipInfo.until > today);
+      if (isSkipped) row.style.opacity = '0.45';
 
       let upsideCell;
       if (upside === undefined) {
@@ -3026,19 +3090,27 @@
         <div><span class="action-badge ${actionClass}">${actionLabel}</span></div>
         <div>${upsideCell}</div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px">
-          <button class="add-watch-btn ${inWatch ? 'added' : ''}"
-            id="watch-btn-${i}"
-            onclick="addFromScreener('${item.symbol}', ${i})"
-            ${inWatch ? 'disabled' : ''}>
-            ${inWatch ? '✓ Watching' : '+ Watch'}
-          </button>
-          ${openPositions.some(p => p.sym === item.symbol) ? '<span style="font-size:0.58rem;font-weight:700;color:var(--accent2);letter-spacing:0.06em">💼 HOLDING</span>' : ''}
-          ${isInAnyPracticeAccount(item.symbol) ? '<span style="font-size:0.58rem;font-weight:700;color:var(--accent);letter-spacing:0.06em">🎮 PRACTICE</span>' : ''}
+          ${isSkipped ? `
+            <button class="add-watch-btn" onclick="restoreSymbol('${item.symbol}')">↩ Restore</button>
+            <span style="font-size:0.6rem;color:var(--muted)">Hidden until ${skipInfo.until}</span>
+          ` : `
+            <div style="display:flex;gap:4px">
+              <button class="add-watch-btn ${inWatch ? 'added' : ''}"
+                id="watch-btn-${i}"
+                onclick="addFromScreener('${item.symbol}', ${i})"
+                ${inWatch ? 'disabled' : ''}>
+                ${inWatch ? '✓ Watching' : '+ Watch'}
+              </button>
+              <button class="skip-btn" title="Not interested — hide for a while" onclick="skipSymbol('${item.symbol}')">✕</button>
+            </div>
+            ${openPositions.some(p => p.sym === item.symbol) ? '<span style="font-size:0.58rem;font-weight:700;color:var(--accent2);letter-spacing:0.06em">💼 HOLDING</span>' : ''}
+            ${isInAnyPracticeAccount(item.symbol) ? '<span style="font-size:0.58rem;font-weight:700;color:var(--accent);letter-spacing:0.06em">🎮 PRACTICE</span>' : ''}
+          `}
         </div>
       `;
       row.style.cursor = 'pointer';
       row.onclick = (e) => {
-        if (e.target.classList.contains('add-watch-btn') || e.target.tagName === 'A') return;
+        if (e.target.classList.contains('add-watch-btn') || e.target.classList.contains('skip-btn') || e.target.tagName === 'A') return;
         openDrawer(item.symbol);
       };
       list.appendChild(row);
