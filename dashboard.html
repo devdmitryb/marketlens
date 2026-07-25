@@ -1416,8 +1416,6 @@
       <div class="dot"></div>
       <span id="marketStatusText">LIVE</span>
     </div>
-    <button class="btn secondary" onclick="syncToServer().then(ok => alert(ok ? '✅ Synced!' : '❌ Sync failed'))"
-      style="font-size:0.72rem;padding:5px 12px;margin-left:8px" title="Sync data to server">↑ Sync</button>
     <button class="btn secondary" onclick="logout()"
       style="font-size:0.72rem;padding:5px 12px;margin-left:4px">Sign Out</button>
   </div>
@@ -1542,7 +1540,6 @@
             style="width:90px;accent-color:var(--accent);cursor:pointer" />
           <span id="thresholdLabel" style="font-family:var(--mono);color:var(--accent);min-width:36px">20%</span>
         </label>
-        <button class="btn secondary" id="enrichBtn" onclick="enrichAll()">✦ Enrich All</button>
         <button class="btn secondary" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Show Hidden</button>
         <button class="btn secondary" onclick="loadScreener()">↻ Refresh</button>
       </div>
