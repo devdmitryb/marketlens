@@ -120,13 +120,17 @@
     <div class="logo">Market<span>Lens</span></div>
     <div class="subtitle">Stock Analyst Dashboard</div>
 
+    <label>Username</label>
+    <input type="text" id="username" placeholder="Enter username"
+      onkeydown="if(event.key==='Enter') login()" autofocus />
+
     <label>Password</label>
     <input type="password" id="password" placeholder="Enter password"
-      onkeydown="if(event.key==='Enter') login()" autofocus />
+      onkeydown="if(event.key==='Enter') login()" />
 
     <button onclick="login()" id="loginBtn">Sign In</button>
     <div class="spinner" id="spinner"></div>
-    <div class="error" id="error">Incorrect password. Try again.</div>
+    <div class="error" id="error">Invalid username or password.</div>
   </div>
 
   <script>
@@ -136,9 +140,24 @@
     const token = sessionStorage.getItem('ml_token') || localStorage.getItem('ml_token');
     if (token) window.location.href = '/dashboard.html';
 
+    // Per-user localStorage keys wiped when a different account logs in
+    const PER_USER_KEYS = [
+      'watchlist', 'portfolio_open', 'portfolio_closed',
+      'practice_accounts', 'practice_current',
+      'signal_log', 'prev_signals', 'slog_last_visit', 'screener_last_visit',
+    ];
+
+    function clearPerUserData() {
+      PER_USER_KEYS.forEach(k => localStorage.removeItem(k));
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('cache_')) localStorage.removeItem(k);
+      });
+    }
+
     async function login() {
-      const pwd = document.getElementById('password').value.trim();
-      if (!pwd) return;
+      const username = document.getElementById('username').value.trim();
+      const pwd      = document.getElementById('password').value.trim();
+      if (!username || !pwd) return;
 
       const btn     = document.getElementById('loginBtn');
       const spinner = document.getElementById('spinner');
@@ -152,17 +171,28 @@
         const res = await fetch(`${SERVER}/api/login`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ password: pwd }),
+          body:    JSON.stringify({ username, password: pwd }),
         });
 
-        if (res.ok) {
-          const { token } = await res.json();
-          sessionStorage.setItem('ml_token', token);
-          localStorage.setItem('ml_token', token); // remember across sessions
-          window.location.href = '/dashboard.html';
-        } else {
-          throw new Error('Invalid');
+        if (!res.ok) throw new Error('Invalid');
+        const { token } = await res.json();
+
+        const meRes = await fetch(`${SERVER}/api/me`, { headers: { 'x-app-token': token } });
+        if (!meRes.ok) throw new Error('Invalid');
+        const user = await meRes.json();
+
+        const lastUser = localStorage.getItem('ml_last_user');
+        if (lastUser && lastUser !== String(user.id)) {
+          clearPerUserData();
         }
+        localStorage.setItem('ml_last_user', String(user.id));
+
+        sessionStorage.setItem('ml_token', token);
+        localStorage.setItem('ml_token', token); // remember across sessions
+        sessionStorage.setItem('ml_user', JSON.stringify(user));
+        localStorage.setItem('ml_user', JSON.stringify(user));
+
+        window.location.href = '/dashboard.html';
       } catch {
         btn.style.display     = 'block';
         spinner.style.display = 'none';

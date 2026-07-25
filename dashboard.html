@@ -1396,8 +1396,10 @@
     <button onclick="showPage('signallog')" id="nav-signallog">📓 Signal Log</button>
     <button onclick="showPage('practice')">Practice</button>
     <button onclick="showPage('backtest')">🔬 Backtest</button>
+    <button onclick="showPage('admin')" id="nav-admin" style="display:none">🛡️ Admin</button>
   </nav>
   <div class="header-right">
+    <span id="userDisplayName" style="font-size:0.78rem;color:var(--text-dim);font-family:var(--mono);margin-right:4px"></span>
     <div class="market-status">
       <div class="dot"></div>
       <span id="marketStatusText">LIVE</span>
@@ -1808,6 +1810,32 @@
 
   </div>
 
+  <!-- ═══ ADMIN PAGE ═══ -->
+  <div class="page" id="page-admin">
+
+    <div class="section-title">Create User</div>
+    <div class="watchlist-bar" style="flex-wrap:wrap">
+      <input type="text" id="admin-username" placeholder="Username" style="flex:1;min-width:120px" />
+      <input type="password" id="admin-password" placeholder="Password" style="flex:1;min-width:120px" />
+      <input type="text" id="admin-displayname" placeholder="Display name" style="flex:1;min-width:120px" />
+      <input type="email" id="admin-email" placeholder="Email (optional)" style="flex:1;min-width:120px" />
+      <select id="admin-role" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0 10px;font-family:var(--mono);font-size:0.85rem">
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+      </select>
+      <button class="btn" onclick="createAdminUser()">+ Create User</button>
+    </div>
+
+    <div class="section-title">Users</div>
+    <div class="pos-header" style="grid-template-columns:120px 140px 1fr 80px 150px 150px">
+      <div>Username</div><div>Display Name</div><div>Email</div><div>Role</div><div>Last Active</div><div>Actions</div>
+    </div>
+    <div class="pos-table" id="adminUsersTable">
+      <div class="empty-state"><div class="big">🛡️</div><p>Loading users…</p></div>
+    </div>
+
+  </div>
+
 </main>
 
 <!-- ═══ NEW PRACTICE ACCOUNT MODAL ═══ -->
@@ -2077,6 +2105,9 @@
       renderSlog();
       if (API_KEY) autoRefreshForSlog();
     }
+    if (name === 'admin') {
+      loadAdminUsers();
+    }
   }
 
   // ══════════════════════════════════════════
@@ -2122,6 +2153,114 @@
       checkServerHealth();
     }
     refreshAll();
+  }
+
+  // ══════════════════════════════════════════
+  //  CURRENT USER / ADMIN
+  // ══════════════════════════════════════════
+  let currentUser = null;
+
+  async function loadCurrentUser() {
+    if (!APP_TOKEN) return;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/me`, { headers: { 'x-app-token': APP_TOKEN } });
+      if (!res.ok) return;
+      currentUser = await res.json();
+      localStorage.setItem('ml_user', JSON.stringify(currentUser));
+
+      const nameEl = document.getElementById('userDisplayName');
+      if (nameEl) nameEl.textContent = currentUser.display_name || currentUser.username;
+
+      const adminBtn = document.getElementById('nav-admin');
+      if (adminBtn) adminBtn.style.display = currentUser.role === 'admin' ? '' : 'none';
+    } catch(e) { console.warn('Could not load current user:', e.message); }
+  }
+
+  async function loadAdminUsers() {
+    const table = document.getElementById('adminUsersTable');
+    if (!table) return;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/admin/users`, { headers: { 'x-app-token': APP_TOKEN } });
+      if (!res.ok) throw new Error('Failed to load users');
+      const users = await res.json();
+      if (!users.length) {
+        table.innerHTML = '<div class="empty-state"><div class="big">🛡️</div><p>No users yet.</p></div>';
+        return;
+      }
+      table.innerHTML = users.map(u => `
+        <div class="pos-row" style="grid-template-columns:120px 140px 1fr 80px 150px 150px">
+          <div class="pos-sym">${escapeHtml(u.username)}</div>
+          <div>${escapeHtml(u.display_name || '—')}</div>
+          <div class="pos-note">${escapeHtml(u.email || '—')}</div>
+          <div>${escapeHtml(u.role)}</div>
+          <div class="pos-days">${u.last_active ? new Date(u.last_active).toLocaleString() : 'Never'}</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn secondary" style="font-size:0.68rem;padding:4px 8px" onclick="resetAdminPassword(${u.id}, '${escapeHtml(u.username)}')">Reset PW</button>
+            ${currentUser && u.id === currentUser.id ? '' : `<button class="btn secondary" style="font-size:0.68rem;padding:4px 8px" onclick="deleteAdminUser(${u.id}, '${escapeHtml(u.username)}')">Delete</button>`}
+          </div>
+        </div>
+      `).join('');
+    } catch(e) {
+      table.innerHTML = `<div class="empty-state"><p>Failed to load users: ${escapeHtml(e.message)}</p></div>`;
+    }
+  }
+
+  async function createAdminUser() {
+    const username    = document.getElementById('admin-username').value.trim();
+    const password    = document.getElementById('admin-password').value;
+    const displayName = document.getElementById('admin-displayname').value.trim();
+    const email       = document.getElementById('admin-email').value.trim();
+    const role        = document.getElementById('admin-role').value;
+    if (!username || !password) { alert('Username and password are required'); return; }
+
+    try {
+      const res = await fetch(`${SERVER_URL}/api/admin/users`, {
+        method: 'POST',
+        headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, displayName, email, role }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Failed to create user'); return; }
+
+      document.getElementById('admin-username').value = '';
+      document.getElementById('admin-password').value = '';
+      document.getElementById('admin-displayname').value = '';
+      document.getElementById('admin-email').value = '';
+      document.getElementById('admin-role').value = 'member';
+      loadAdminUsers();
+    } catch(e) { alert('Failed to create user: ' + e.message); }
+  }
+
+  async function resetAdminPassword(id, username) {
+    const newPassword = prompt(`New password for ${username}:`);
+    if (!newPassword) return;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/admin/users/${id}/reset-password`, {
+        method: 'POST',
+        headers: { 'x-app-token': APP_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Failed to reset password'); return; }
+      alert(`Password reset for ${username}`);
+    } catch(e) { alert('Failed to reset password: ' + e.message); }
+  }
+
+  async function deleteAdminUser(id, username) {
+    if (!confirm(`Delete user "${username}"? This removes their watchlist, portfolio, and practice data too.`)) return;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/admin/users/${id}`, {
+        method: 'DELETE',
+        headers: { 'x-app-token': APP_TOKEN },
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Failed to delete user'); return; }
+      loadAdminUsers();
+    } catch(e) { alert('Failed to delete user: ' + e.message); }
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   }
 
   // ══════════════════════════════════════════
@@ -5479,6 +5618,7 @@
   updateSlogBadge();
   renderPortfolio();
   initPracticeAccounts();
+  loadCurrentUser();
   checkServerHealth().then(async (connected) => {
     // Load watchlist from server
     if (connected && APP_TOKEN) {

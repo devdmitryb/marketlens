@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
 const path    = require('path');
+const bcrypt  = require('bcrypt');
+const jwt     = require('jsonwebtoken');
 const store   = require('./store');
 const db      = require('./db');
 const fmp     = require('./fmp');
@@ -9,6 +11,7 @@ const { startCronJobs } = require('./cron');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // ── Middleware ────────────────────────────────────────────────────
 app.use(cors({ origin: [
@@ -27,28 +30,51 @@ app.get('/', (req, res) => {
 });
 
 // ── Login endpoint ────────────────────────────────────────────────
-app.post('/api/login', (req, res) => {
-  const { password } = req.body;
-  const correctPwd   = process.env.APP_PASSWORD;
-
-  if (!correctPwd) {
-    // No password set — allow access (dev mode)
-    return res.json({ token: process.env.APP_TOKEN || 'dev' });
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password required' });
   }
 
-  if (password === correctPwd) {
-    res.json({ token: process.env.APP_TOKEN });
-  } else {
-    res.status(401).json({ error: 'Invalid password' });
+  try {
+    const user = await db.getUserByUsername(username);
+    if (!user) return res.status(401).json({ error: 'Invalid username or password' });
+
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Invalid username or password' });
+
+    const token = jwt.sign(
+      { user_id: user.id, username: user.username, role: user.role, display_name: user.display_name },
+      JWT_SECRET,
+      { expiresIn: '90d' }
+    );
+
+    await db.touchLastActive(user.id);
+
+    res.json({ token });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
 // ── Auth middleware ───────────────────────────────────────────────
-// Simple token auth — set APP_TOKEN in environment
+// JWT auth — token carries { user_id, username, role, display_name }
 function auth(req, res, next) {
   const token = req.headers['x-app-token'] || req.query.token;
-  if (process.env.APP_TOKEN && token !== process.env.APP_TOKEN) {
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch(e) {
     return res.status(401).json({ error: 'Unauthorized' });
+  }
+}
+
+// Admin-only routes — must run after auth()
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin only' });
   }
   next();
 }
@@ -82,6 +108,76 @@ app.get('/api/health', (req, res) => {
     time:   new Date().toISOString(),
     screener: store.read('screener_meta', {}),
   });
+});
+
+// Current session's user info
+app.get('/api/me', auth, async (req, res) => {
+  try {
+    const user = await db.getUserById(req.user.user_id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const { password_hash, ...safeUser } = user;
+    res.json(safeUser);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Admin: user management ────────────────────────────────────────
+app.get('/api/admin/users', auth, requireAdmin, async (req, res) => {
+  try {
+    const users = await db.getUsers();
+    res.json(users);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/users', auth, requireAdmin, async (req, res) => {
+  const { username, password, displayName, email, role } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password required' });
+  }
+  if (role && !['admin', 'member'].includes(role)) {
+    return res.status(400).json({ error: 'role must be admin or member' });
+  }
+
+  try {
+    const existing = await db.getUserByUsername(username);
+    if (existing) return res.status(409).json({ error: 'Username already exists' });
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await db.createUser({ username, passwordHash, displayName, email, role });
+    res.json(user);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/api/admin/users/:id', auth, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (id === req.user.user_id) {
+    return res.status(400).json({ error: 'Cannot delete your own account' });
+  }
+  try {
+    await db.deleteUser(id);
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/users/:id/reset-password', auth, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { newPassword } = req.body;
+  if (!newPassword) return res.status(400).json({ error: 'newPassword required' });
+
+  try {
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await db.updateUserPassword(id, passwordHash);
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Screener feed (cached, no FMP call)
@@ -201,10 +297,10 @@ app.get('/api/signal-log', auth, async (req, res) => {
   }
 });
 
-// Watchlist — read/write from server (shared across devices!)
+// Watchlist — per-user, read/write from server (shared across devices!)
 app.get('/api/watchlist', auth, async (req, res) => {
   try {
-    const data = await db.getWatchlist();
+    const data = await db.getWatchlist(req.user.user_id);
     res.json(data);
   } catch(e) {
     console.error('[db] getWatchlist failed, falling back to store:', e.message);
@@ -216,7 +312,7 @@ app.post('/api/watchlist', auth, async (req, res) => {
   const { symbols } = req.body;
   if (!Array.isArray(symbols)) return res.status(400).json({ error: 'symbols must be array' });
   try {
-    await db.saveWatchlist(symbols);
+    await db.saveWatchlist(symbols, req.user.user_id);
   } catch(e) {
     console.error('[db] saveWatchlist failed, falling back to store:', e.message);
     store.write('watchlist', symbols);
@@ -224,10 +320,10 @@ app.post('/api/watchlist', auth, async (req, res) => {
   res.json({ ok: true, symbols });
 });
 
-// Practice accounts — sync across devices
+// Practice accounts — per-user, sync across devices
 app.get('/api/practice', auth, async (req, res) => {
   try {
-    const data = await db.getPractice();
+    const data = await db.getPractice(req.user.user_id);
     res.json(data);
   } catch(e) {
     console.error('[db] getPractice failed, falling back to store:', e.message);
@@ -239,7 +335,7 @@ app.post('/api/practice', auth, async (req, res) => {
   const { accounts } = req.body;
   if (!Array.isArray(accounts)) return res.status(400).json({ error: 'accounts must be array' });
   try {
-    await db.savePractice(accounts);
+    await db.savePractice(accounts, req.user.user_id);
   } catch(e) {
     console.error('[db] savePractice failed, falling back to store:', e.message);
     store.write('practice', accounts);
@@ -247,10 +343,10 @@ app.post('/api/practice', auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Portfolio — sync across devices
+// Portfolio — per-user, sync across devices
 app.get('/api/portfolio', auth, async (req, res) => {
   try {
-    const data = await db.getPortfolio();
+    const data = await db.getPortfolio(req.user.user_id);
     res.json(data);
   } catch(e) {
     console.error('[db] getPortfolio failed, falling back to store:', e.message);
@@ -262,7 +358,7 @@ app.post('/api/portfolio', auth, async (req, res) => {
   const data = req.body;
   if (!data) return res.status(400).json({ error: 'No data' });
   try {
-    await db.savePortfolio(data);
+    await db.savePortfolio(data, req.user.user_id);
   } catch(e) {
     console.error('[db] savePortfolio failed, falling back to store:', e.message);
     store.write('portfolio', data);
