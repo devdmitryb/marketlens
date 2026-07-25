@@ -65,28 +65,39 @@ async function collectScreenerFeed() {
   }
 }
 
-// ── JOB 2: Quote + signal refresh for watched symbols ────────────
+// ── JOB 2: Quote + signal refresh for watched symbols (all users) ─
 async function refreshWatchedSymbols() {
   console.log('[cron] Refreshing watched symbols…');
 
-  let watchlist, portfolio, practice;
+  let users;
   try {
-    [watchlist, portfolio, practice] = await Promise.all([
-      db.getWatchlist(),
-      db.getPortfolio(),
-      db.getPractice(),
-    ]);
+    users = await db.getUsers();
   } catch(e) {
-    console.error('[db] Failed to load watchlist/portfolio/practice, falling back to store:', e.message);
-    watchlist = store.read('watchlist', []);
-    portfolio = store.read('portfolio', { open: [], closed: [] });
-    practice  = store.read('practice', []);
+    console.error('[db] getUsers failed, aborting refresh:', e.message);
+    return;
   }
 
-  // All symbols that need monitoring — watchlist + open portfolio + open practice
-  const portfolioSyms = (portfolio.open || []).map(p => p.sym);
-  const practiceSyms  = practice.flatMap(a => (a.open || []).map(p => p.sym));
-  const allSyms = [...new Set([...watchlist, ...portfolioSyms, ...practiceSyms])];
+  // Load each user's watchlist/portfolio/practice so we know who to alert later —
+  // one user's failure doesn't block the others (no per-user store.js fallback: it
+  // predates multiuser and has no concept of separate users' data)
+  const userHoldings = [];
+  for (const user of users) {
+    try {
+      const [watchlist, portfolio, practice] = await Promise.all([
+        db.getWatchlist(user.id),
+        db.getPortfolio(user.id),
+        db.getPractice(user.id),
+      ]);
+      const portfolioSyms = (portfolio.open || []).map(p => p.sym);
+      const practiceSyms  = practice.flatMap(a => (a.open || []).map(p => p.sym));
+      userHoldings.push({ user, watchlist, portfolioSyms, practiceSyms });
+    } catch(e) {
+      console.error(`[db] Failed to load holdings for user ${user.username}, skipping them:`, e.message);
+    }
+  }
+
+  // Union of every symbol any user is tracking — fetched/signaled once, not per-user
+  const allSyms = [...new Set(userHoldings.flatMap(h => [...h.watchlist, ...h.portfolioSyms, ...h.practiceSyms]))];
 
   if (!allSyms.length) return;
 
@@ -205,17 +216,21 @@ async function refreshWatchedSymbols() {
         console.log(`[cron] Signal change: ${sym} ${prevSignal} → ${newSignal}`);
         await logSignalChange(sym, newSignal, prevSignal, upside);
 
-        const inPortfolio = portfolioSyms.includes(sym);
-        const inPractice  = practiceSyms.includes(sym);
-        const inWatchlist = watchlist.includes(sym);
+        // Notify every user tracking this symbol, based on their own holdings
+        for (const { user, watchlist, portfolioSyms, practiceSyms } of userHoldings) {
+          const inPortfolio = portfolioSyms.includes(sym);
+          const inPractice  = practiceSyms.includes(sym);
+          const inWatchlist = watchlist.includes(sym);
+          if (!inPortfolio && !inPractice && !inWatchlist) continue;
 
-        // Email: BUY for watchlist (not already in portfolio/practice)
-        if (inWatchlist && !inPortfolio && !inPractice && newSignal === 'BUY') {
-          await sendEmailAlert(sym, newSignal, prevSignal, upside, '🟢 Time to BUY!');
-        }
-        // Email: SELL signals for portfolio and practice
-        if ((inPortfolio || inPractice) && newSignal === 'SELL') {
-          await sendEmailAlert(sym, newSignal, prevSignal, upside, '🔴 Time to SELL!');
+          // Email: BUY for watchlist (not already in portfolio/practice)
+          if (inWatchlist && !inPortfolio && !inPractice && newSignal === 'BUY') {
+            await sendEmailAlert(user.email, sym, newSignal, prevSignal, upside, '🟢 Time to BUY!');
+          }
+          // Email: SELL signals for portfolio and practice
+          if ((inPortfolio || inPractice) && newSignal === 'SELL') {
+            await sendEmailAlert(user.email, sym, newSignal, prevSignal, upside, '🔴 Time to SELL!');
+          }
         }
       }
 
@@ -226,7 +241,10 @@ async function refreshWatchedSymbols() {
     }
   }
 
-  console.log(`[cron] Refreshed ${allSyms.length} symbols (${watchlist.length} watchlist + ${portfolioSyms.length} portfolio + ${practiceSyms.length} practice), ${changed.length} signal changes`);
+  const totalWatchlist = userHoldings.reduce((n, h) => n + h.watchlist.length, 0);
+  const totalPortfolio = userHoldings.reduce((n, h) => n + h.portfolioSyms.length, 0);
+  const totalPractice  = userHoldings.reduce((n, h) => n + h.practiceSyms.length, 0);
+  console.log(`[cron] Refreshed ${allSyms.length} symbols across ${userHoldings.length} users (${totalWatchlist} watchlist + ${totalPortfolio} portfolio + ${totalPractice} practice), ${changed.length} signal changes`);
 }
 
 // ── JOB 3: Screener upside enrichment ────────────────────────────
@@ -283,10 +301,12 @@ async function enrichScreenerUpside() {
 }
 
 // ── EMAIL ALERTS ─────────────────────────────────────────────────
-async function sendEmailAlert(sym, newSignal, oldSignal, upside, context = '') {
-  const user = process.env.GMAIL_USER;
-  const pass = process.env.GMAIL_APP_PASSWORD;
-  if (!user || !pass) return;
+// `to` is the specific user's email — the account that owns the symbol, not
+// necessarily whoever GMAIL_USER/GMAIL_APP_PASSWORD (the sending account) belongs to
+async function sendEmailAlert(to, sym, newSignal, oldSignal, upside, context = '') {
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  if (!gmailUser || !gmailPass || !to) return;
 
   const subject = `${context} MarketLens: ${sym} — ${newSignal}`;
   const body = `
@@ -304,15 +324,15 @@ Open MarketLens: https://marketlens-bt5u.onrender.com
     const nodemailer  = require('nodemailer');
     const transporter = nodemailer.createTransport({
       service: 'gmail',
-      auth: { user, pass },
+      auth: { user: gmailUser, pass: gmailPass },
     });
     await transporter.sendMail({
-      from: `"MarketLens" <${user}>`,
-      to:   user,
+      from: `"MarketLens" <${gmailUser}>`,
+      to,
       subject,
       text: body,
     });
-    console.log(`[email] Alert sent: ${sym} ${newSignal}`);
+    console.log(`[email] Alert sent to ${to}: ${sym} ${newSignal}`);
   } catch(e) {
     console.error('[email] Failed:', e.message);
   }

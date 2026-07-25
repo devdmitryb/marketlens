@@ -297,10 +297,10 @@ app.get('/api/signal-log', auth, async (req, res) => {
   }
 });
 
-// Watchlist — read/write from server (shared across devices!)
+// Watchlist — per-user, read/write from server (shared across devices!)
 app.get('/api/watchlist', auth, async (req, res) => {
   try {
-    const data = await db.getWatchlist();
+    const data = await db.getWatchlist(req.user.user_id);
     res.json(data);
   } catch(e) {
     console.error('[db] getWatchlist failed, falling back to store:', e.message);
@@ -312,7 +312,7 @@ app.post('/api/watchlist', auth, async (req, res) => {
   const { symbols } = req.body;
   if (!Array.isArray(symbols)) return res.status(400).json({ error: 'symbols must be array' });
   try {
-    await db.saveWatchlist(symbols);
+    await db.saveWatchlist(symbols, req.user.user_id);
   } catch(e) {
     console.error('[db] saveWatchlist failed, falling back to store:', e.message);
     store.write('watchlist', symbols);
@@ -320,10 +320,10 @@ app.post('/api/watchlist', auth, async (req, res) => {
   res.json({ ok: true, symbols });
 });
 
-// Practice accounts — sync across devices
+// Practice accounts — per-user, sync across devices
 app.get('/api/practice', auth, async (req, res) => {
   try {
-    const data = await db.getPractice();
+    const data = await db.getPractice(req.user.user_id);
     res.json(data);
   } catch(e) {
     console.error('[db] getPractice failed, falling back to store:', e.message);
@@ -335,7 +335,7 @@ app.post('/api/practice', auth, async (req, res) => {
   const { accounts } = req.body;
   if (!Array.isArray(accounts)) return res.status(400).json({ error: 'accounts must be array' });
   try {
-    await db.savePractice(accounts);
+    await db.savePractice(accounts, req.user.user_id);
   } catch(e) {
     console.error('[db] savePractice failed, falling back to store:', e.message);
     store.write('practice', accounts);
@@ -343,10 +343,10 @@ app.post('/api/practice', auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Portfolio — sync across devices
+// Portfolio — per-user, sync across devices
 app.get('/api/portfolio', auth, async (req, res) => {
   try {
-    const data = await db.getPortfolio();
+    const data = await db.getPortfolio(req.user.user_id);
     res.json(data);
   } catch(e) {
     console.error('[db] getPortfolio failed, falling back to store:', e.message);
@@ -358,7 +358,7 @@ app.post('/api/portfolio', auth, async (req, res) => {
   const data = req.body;
   if (!data) return res.status(400).json({ error: 'No data' });
   try {
-    await db.savePortfolio(data);
+    await db.savePortfolio(data, req.user.user_id);
   } catch(e) {
     console.error('[db] savePortfolio failed, falling back to store:', e.message);
     store.write('portfolio', data);
