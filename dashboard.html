@@ -1376,6 +1376,29 @@
     @media (max-width: 768px) {
       .drawer { width: 100vw; }
     }
+
+    .toast {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-family: var(--sans);
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #0a0a0f;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+      max-width: 90vw;
+      text-align: center;
+    }
+    .toast.show { opacity: 1; }
+    .toast.toast-success { background: var(--accent2); }
+    .toast.toast-error   { background: var(--danger); color: #fff; }
   </style>
 </head>
 <body>
@@ -2072,6 +2095,23 @@
 
 <script>
   // ══════════════════════════════════════════
+  //  TOAST
+  // ══════════════════════════════════════════
+  let toastTimer = null;
+  function toast(message, type = 'success') {
+    let el = document.getElementById('toastEl');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'toastEl';
+      document.body.appendChild(el);
+    }
+    clearTimeout(toastTimer);
+    el.textContent = message;
+    el.className = `toast toast-${type} show`;
+    toastTimer = setTimeout(() => { el.classList.remove('show'); }, 2500);
+  }
+
+  // ══════════════════════════════════════════
   //  STATE
   // ══════════════════════════════════════════
   let API_KEY = localStorage.getItem('fmp_key') || '';
@@ -2258,7 +2298,7 @@
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error || 'Failed to reset password'); return; }
-      alert(`Password reset for ${username}`);
+      toast(`Password reset for ${username}`, 'success');
     } catch(e) { alert('Failed to reset password: ' + e.message); }
   }
 
@@ -3746,10 +3786,13 @@
           </div>
         </div>`;
 
+      if (!document.getElementById('drawerActions').innerHTML.trim()) console.warn('drawerActions is empty for', sym);
+
       // Load 1M chart by default
       loadChart(sym, 30, null);
 
     } catch(e) {
+      console.error('loadDrawerData error:', e);
       document.getElementById('drawerBody').innerHTML = `<p style="color:var(--danger);padding:20px">Error: ${e.message}</p>`;
     }
   }
@@ -4676,7 +4719,7 @@
       closeDrawer();
       fetchPracticePrice(sym);
       renderPractice();
-      alert(`✅ Bought ${shares} shares of ${sym} at $${price.toFixed(2)}`);
+      toast(`✅ Bought ${shares} shares of ${sym} at $${price.toFixed(2)}`, 'success');
     } finally {
       buyBtn.disabled = false;
     }
