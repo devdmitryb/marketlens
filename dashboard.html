@@ -1921,7 +1921,7 @@
     </div>
     <div class="modal-actions">
       <button class="btn secondary" onclick="document.getElementById('practiceBuyModal').classList.remove('open')">Cancel</button>
-      <button class="btn" onclick="executePracticeBuy()">🎮 Buy</button>
+      <button class="btn" id="pb-confirm" onclick="executePracticeBuy()">🎮 Buy</button>
     </div>
   </div>
 </div>
@@ -4640,37 +4640,46 @@
   }
 
   async function executePracticeBuy() {
-    const acc = getSelectedBuyAccount();
-    if (!acc) return;
-    const sym    = document.getElementById('pb-symbol').value.trim().toUpperCase();
-    const shares = parseFloat(document.getElementById('pb-shares').value);
-    const date   = document.getElementById('pb-date').value;
-    const note   = document.getElementById('pb-note').value.trim();
-    let price    = parseFloat(document.getElementById('pb-price').value);
+    const buyBtn = document.getElementById('pb-confirm');
+    if (buyBtn.disabled) return;
+    buyBtn.disabled = true;
+    try {
+      const acc = getSelectedBuyAccount();
+      if (!acc) return;
+      const sym    = document.getElementById('pb-symbol').value.trim().toUpperCase();
+      const shares = parseFloat(document.getElementById('pb-shares').value);
+      const date   = document.getElementById('pb-date').value;
+      const note   = document.getElementById('pb-note').value.trim();
+      let price    = parseFloat(document.getElementById('pb-price').value);
 
-    if (!sym || !shares || !date) { alert('Please fill symbol, shares and date.'); return; }
-    if (!note) { alert('Please add a note — why are you buying this?'); document.getElementById('pb-note').focus(); return; }
+      if (!sym || !shares || !date) { alert('Please fill symbol, shares and date.'); return; }
+      if (!note) { alert('Please add a note — why are you buying this?'); document.getElementById('pb-note').focus(); return; }
 
-    // Fetch live price if not provided
-    if (!price) {
-      try {
-        price = await fetchLivePrice(sym);
-        if (!price) { alert('Could not fetch price. Please enter manually.'); return; }
-        livePracticePrices[sym] = price;
-      } catch { alert('Could not fetch price. Please enter manually.'); return; }
+      // Fetch live price if not provided
+      if (!price) {
+        try {
+          price = await fetchLivePrice(sym);
+          if (!price) { alert('Could not fetch price. Please enter manually.'); return; }
+          livePracticePrices[sym] = price;
+        } catch { alert('Could not fetch price. Please enter manually.'); return; }
+      }
+
+      const cost = shares * price + acc.commission;
+      if (cost > acc.cash) { alert(`Insufficient cash! Need $${cost.toFixed(2)}, have $${acc.cash.toFixed(2)}`); return; }
+
+      acc.cash -= cost;
+      const position = { id: Date.now(), sym, shares, entryPrice: price, entryComm: acc.commission, date, note };
+      acc.open.push(position);
+      acc.trades.push({ ts: new Date().toISOString(), type:'BUY', sym, shares, price, commission: acc.commission, note });
+      savePracticeAccounts();
+      document.getElementById('practiceBuyModal').classList.remove('open');
+      closeDrawer();
+      fetchPracticePrice(sym);
+      renderPractice();
+      alert(`✅ Bought ${shares} shares of ${sym} at $${price.toFixed(2)}`);
+    } finally {
+      buyBtn.disabled = false;
     }
-
-    const cost = shares * price + acc.commission;
-    if (cost > acc.cash) { alert(`Insufficient cash! Need $${cost.toFixed(2)}, have $${acc.cash.toFixed(2)}`); return; }
-
-    acc.cash -= cost;
-    const position = { id: Date.now(), sym, shares, entryPrice: price, entryComm: acc.commission, date, note };
-    acc.open.push(position);
-    acc.trades.push({ ts: new Date().toISOString(), type:'BUY', sym, shares, price, commission: acc.commission, note });
-    savePracticeAccounts();
-    document.getElementById('practiceBuyModal').classList.remove('open');
-    fetchPracticePrice(sym);
-    renderPractice();
   }
 
   // ── SELL ──
