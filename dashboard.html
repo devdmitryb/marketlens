@@ -2857,7 +2857,7 @@
   function skipSymbol(sym) {
     const skipped = loadSkipped();
     const count = (skipped[sym]?.count || 0) + 1;
-    const months = 6 * Math.pow(2, count - 1); // 6, 12, 24, 48…
+    const months = Math.min(count * 3, 12); // 3, 6, 9, 12…
     const until = new Date();
     until.setMonth(until.getMonth() + months);
     skipped[sym] = { count, until: until.toISOString().slice(0, 10) };
@@ -3098,7 +3098,6 @@
                 ${inWatch ? 'disabled' : ''}>
                 ${inWatch ? '✓ Watching' : '+ Watch'}
               </button>
-              <button class="skip-btn" title="Not interested — hide for a while" onclick="skipSymbol('${item.symbol}')">✕</button>
             </div>
             ${openPositions.some(p => p.sym === item.symbol) ? '<span style="font-size:0.58rem;font-weight:700;color:var(--accent2);letter-spacing:0.06em">💼 HOLDING</span>' : ''}
             ${isInAnyPracticeAccount(item.symbol) ? '<span style="font-size:0.58rem;font-weight:700;color:var(--accent);letter-spacing:0.06em">🎮 PRACTICE</span>' : ''}
@@ -3357,7 +3356,10 @@
   // ══════════════════════════════════════════
   //  DETAIL DRAWER
   // ══════════════════════════════════════════
+  let currentDrawerSym = null;
+
   function openDrawer(sym) {
+    currentDrawerSym = sym;
     document.getElementById('drawerSym').textContent = sym;
     document.getElementById('drawerName').textContent = '';
     document.getElementById('drawerBody').innerHTML = `<div class="drawer-loading"><div class="spinner"></div> Fetching data…</div>`;
@@ -3737,6 +3739,9 @@
             <button class="btn" style="flex:1;background:var(--accent2);color:#0a0a0f"
               onclick="openPracticeBuyFromDrawer('${sym}', ${curPrice}, \`${autoNote.replace(/`/g,"'")}\`)">
               🎮 Practice Buy
+            </button>
+            <button class="btn secondary" style="flex:1" onclick="skipSymbol(currentDrawerSym); closeDrawer();">
+              👎 Not Interested
             </button>
           </div>
         </div>`;
