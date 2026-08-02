@@ -2437,6 +2437,16 @@
       if (Array.isArray(target))  target  = target[0]  || null;
       if (!Array.isArray(grades)) grades  = grades ? [grades] : [];
       if (!Array.isArray(history)) history = [];
+      // PostgreSQL returns NUMERIC columns as strings — normalize to real numbers
+      // before anything renders, caches, or computes momentum on this data
+      history = history.map(d => ({
+        ...d,
+        close:  parseFloat(d.close),
+        open:   parseFloat(d.open),
+        high:   parseFloat(d.high),
+        low:    parseFloat(d.low),
+        volume: parseInt(d.volume) || 0,
+      }));
 
       if (quote)        cacheSet(`quote_${sym}`,   quote);
       if (grades.length) cacheSet(`grades_${sym}`, grades);
@@ -2481,8 +2491,11 @@
 
     // Sort oldest→newest
     const sorted = [...history].sort((a, b) => new Date(a.date) - new Date(b.date));
-    const prices  = sorted.map(d => d.close);
-    const volumes = sorted.map(d => d.volume || 0);
+    // PostgreSQL returns NUMERIC columns as strings — parse here so callers that
+    // fetch history without normalizing it (e.g. backtest) don't silently corrupt
+    // sums via string concatenation in the reduce() calls below
+    const prices  = sorted.map(d => parseFloat(d.close));
+    const volumes = sorted.map(d => parseInt(d.volume) || 0);
     const n = prices.length;
 
     const last  = prices[n - 1];
@@ -3135,6 +3148,16 @@
         });
         const data = await res.json();
         history = Array.isArray(data) ? data : [];
+        // PostgreSQL returns NUMERIC columns as strings — normalize to real numbers
+        // before anything renders or caches this data
+        history = history.map(d => ({
+          ...d,
+          close:  parseFloat(d.close),
+          open:   parseFloat(d.open),
+          high:   parseFloat(d.high),
+          low:    parseFloat(d.low),
+          volume: parseInt(d.volume) || 0,
+        }));
         if (history.length) {
           chartCache[cacheKey] = history;
           cacheSet(`chart_${cacheKey}`, history);
