@@ -3370,7 +3370,7 @@
             ? arr.find(r => r.date === date) || arr[0]
             : null;
           if (entry?.close) {
-            historicalPrices[date] = entry.close;
+            historicalPrices[date] = parseFloat(entry.close);
           }
         } catch {}
       }));
@@ -3393,7 +3393,7 @@
           <div style="display:flex;justify-content:space-between;width:100%;align-items:center">
             <span class="grade-date-small">${d}</span>
             ${histPrice ? `<span style="font-family:var(--mono);font-size:0.72rem;color:var(--text-dim)">
-              @ $${histPrice.toFixed(2)}
+              @ $${(typeof histPrice === 'number' ? histPrice : parseFloat(histPrice) || 0).toFixed(2)}
               ${cvPct !== null ? `<span class="${cvClass}" style="margin-left:4px">(${cvSign}${cvPct.toFixed(1)}% since)</span>` : ''}
             </span>` : '<span style="font-size:0.68rem;color:var(--muted)">price n/a</span>'}
           </div>
