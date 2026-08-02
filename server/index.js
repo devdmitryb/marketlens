@@ -335,7 +335,10 @@ app.get('/api/history/:sym', auth, async (req, res) => {
       }
     }
 
-    res.json(rows);
+    // Defense in depth — db.getHistory() already returns plain "YYYY-MM-DD"
+    // strings, but normalize here too so this endpoint's contract holds even
+    // if a row ever comes through as a raw Date object
+    res.json(rows.map(r => ({ ...r, date: new Date(r.date).toISOString().slice(0, 10) })));
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
