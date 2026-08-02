@@ -3188,6 +3188,18 @@
   }
 
   function renderChart(wrap, history, sym) {
+    // Defensive re-normalize — history can arrive here via chartCache/localStorage
+    // paths that predate (or otherwise bypass) the parseFloat() fix in loadChart(),
+    // and d.close.toFixed() below requires a real Number, not a numeric string
+    history = history.map(d => ({
+      ...d,
+      close:  parseFloat(d.close),
+      open:   parseFloat(d.open),
+      high:   parseFloat(d.high),
+      low:    parseFloat(d.low),
+      volume: parseInt(d.volume) || 0,
+    }));
+
     const W = wrap.offsetWidth || 320;
     const H = 150;
     const pad = { top: 10, right: 12, bottom: 24, left: 44 };
@@ -4942,7 +4954,15 @@
           fetchS(sym), fetchS('XBI'), fetchG(sym), fetchT(sym),
         ]);
 
-        const parseHist = (res) => Array.isArray(res) ? res : [];
+        // PostgreSQL returns NUMERIC columns as strings — normalize before simulateStrategy/calcBuyAndHold run
+        const parseHist = (res) => (Array.isArray(res) ? res : []).map(d => ({
+          ...d,
+          close:  parseFloat(d.close),
+          open:   parseFloat(d.open),
+          high:   parseFloat(d.high),
+          low:    parseFloat(d.low),
+          volume: parseInt(d.volume) || 0,
+        }));
 
         const history = parseHist(histRes);
         const xbiHist = parseHist(xbiRes);
@@ -5118,7 +5138,15 @@
         fetchGrades(sym), fetchTarget(sym),
       ]);
 
-      const parseHist = (res) => Array.isArray(res) ? res : [];
+      // PostgreSQL returns NUMERIC columns as strings — normalize before simulateStrategy/calcBuyAndHold run
+      const parseHist = (res) => (Array.isArray(res) ? res : []).map(d => ({
+        ...d,
+        close:  parseFloat(d.close),
+        open:   parseFloat(d.open),
+        high:   parseFloat(d.high),
+        low:    parseFloat(d.low),
+        volume: parseInt(d.volume) || 0,
+      }));
 
       const history = parseHist(histRes);
       const xbiHist = parseHist(xbiRes);
