@@ -4135,6 +4135,10 @@
         headers: { 'x-app-token': APP_TOKEN }
       });
       const bySymbol = res.ok ? await res.json() : {};
+      if (Object.keys(bySymbol).length === 0) {
+        console.warn('Overview: empty response from server, not caching — will retry next visit');
+        return;
+      }
       cacheSet('overview_data', bySymbol);
       renderOverviewData(bySymbol);
       updateStatusIndicator(isMarketOpen() ? 'live' : 'closed');
