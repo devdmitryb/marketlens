@@ -234,6 +234,50 @@ async function refreshWatchedSymbols() {
         }
       }
 
+      // Price history — incremental upsert (full 90d backfill on first sighting)
+      try {
+        const { rows: maxRows } = await db.pool.query(
+          'SELECT MAX(date) AS max_date FROM price_history WHERE symbol = $1',
+          [sym]
+        );
+        const maxDateStr = maxRows[0]?.max_date
+          ? new Date(maxRows[0].max_date).toISOString().slice(0, 10)
+          : null;
+        const todayStr = new Date().toISOString().slice(0, 10);
+
+        let histFromStr = null;
+        if (!maxDateStr) {
+          const from90 = new Date(); from90.setDate(from90.getDate() - 90);
+          histFromStr = from90.toISOString().slice(0, 10);
+        } else if (maxDateStr < todayStr) {
+          const nextDay = new Date(maxDateStr); nextDay.setDate(nextDay.getDate() + 1);
+          histFromStr = nextDay.toISOString().slice(0, 10);
+        } // else already up to date — skip fetch
+
+        if (histFromStr) {
+          const histData = await fmp.getHistory(sym, histFromStr);
+          const histRows = (histData || [])
+            .map(d => ({ date: d.date, open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume }))
+            .filter(r => r.date && r.close != null);
+          if (histRows.length) await db.upsertHistory(sym, histRows);
+        }
+      } catch(e) {
+        console.error(`[cron] Price history update failed for ${sym}:`, e.message);
+      }
+
+      // Earnings cache — 24h TTL
+      try {
+        const cachedEarnings = await db.getCachedEarnings(sym);
+        const earningsFresh = cachedEarnings &&
+          (Date.now() - new Date(cachedEarnings.cachedAt).getTime()) < 24 * 60 * 60 * 1000;
+        if (!earningsFresh) {
+          const earningsData = await fmp.getEarnings(sym);
+          await db.setCachedEarnings(sym, earningsData);
+        }
+      } catch(e) {
+        console.error(`[cron] Earnings update failed for ${sym}:`, e.message);
+      }
+
       // Rate limit — increased delay between symbols to avoid FMP 429
       await sleep(800);
     } catch(e) {
@@ -298,6 +342,46 @@ async function enrichScreenerUpside() {
     } catch {}
   }
   console.log(`[cron] Enriched ${enrichedCount} symbols`);
+}
+
+// ── JOB 4: Benchmark symbols (indices/sectors used by Overview + backtest) ──
+// Runs on startup and every 6h — keeps quotes + 90d price history fresh
+// independent of any user's watchlist/portfolio/practice holdings
+const BENCHMARK_SYMBOLS = ['SPY', 'QQQ', 'VXX', 'XBI', 'XPH', 'XLV', 'IWM', 'USO', 'GLD', 'UUP'];
+
+async function refreshBenchmarkSymbols() {
+  console.log('[cron] Refreshing benchmark symbols…');
+  const from90 = new Date(); from90.setDate(from90.getDate() - 90);
+  const from90Str = from90.toISOString().slice(0, 10);
+
+  let refreshed = 0;
+  for (const sym of BENCHMARK_SYMBOLS) {
+    try {
+      const [quote, histData] = await Promise.all([
+        fmp.getQuote(sym),
+        fmp.getHistory(sym, from90Str),
+      ]);
+
+      if (quote) {
+        try {
+          await db.setCachedQuote(sym, quote);
+        } catch(e) {
+          console.error(`[db] setCachedQuote failed for benchmark ${sym}:`, e.message);
+        }
+      }
+
+      const histRows = (histData || [])
+        .map(d => ({ date: d.date, open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume }))
+        .filter(r => r.date && r.close != null);
+      if (histRows.length) await db.upsertHistory(sym, histRows);
+
+      refreshed++;
+    } catch(e) {
+      console.error(`[cron] Error refreshing benchmark ${sym}:`, e.message);
+    }
+    await sleep(800);
+  }
+  console.log(`[cron] Refreshed ${refreshed}/${BENCHMARK_SYMBOLS.length} benchmark symbols`);
 }
 
 // ── EMAIL ALERTS ─────────────────────────────────────────────────
@@ -388,6 +472,11 @@ function startCronJobs() {
     await enrichScreenerUpside();
   });
 
+  // Benchmark symbols — every 6 hours, every day (not tied to market schedule)
+  cron.schedule('0 */6 * * *', async () => {
+    await refreshBenchmarkSymbols();
+  }, { timezone: 'America/New_York' });
+
   console.log('[cron] Jobs scheduled ✅');
 
   // Run immediately on startup
@@ -395,7 +484,8 @@ function startCronJobs() {
     await collectScreenerFeed();
     await enrichScreenerUpside();
     await refreshWatchedSymbols();
+    await refreshBenchmarkSymbols();
   }, 3000);
 }
 
-module.exports = { startCronJobs, collectScreenerFeed, refreshWatchedSymbols };
+module.exports = { startCronJobs, collectScreenerFeed, refreshWatchedSymbols, refreshBenchmarkSymbols };
