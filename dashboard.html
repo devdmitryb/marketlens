@@ -172,33 +172,6 @@
     }
     .btn.secondary:hover { border-color: var(--accent); color: var(--accent); background: var(--surface); }
 
-    /* ── API KEY NOTICE ── */
-    .api-notice {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--accent);
-      border-radius: 8px;
-      padding: 16px 20px;
-      margin-bottom: 28px;
-      font-size: 0.85rem;
-      color: var(--text-dim);
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .api-notice input {
-      flex: 1;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-family: var(--mono);
-      font-size: 0.82rem;
-      padding: 8px 12px;
-      border-radius: 6px;
-      outline: none;
-    }
-    .api-notice input:focus { border-color: var(--accent); }
-
     /* ── STOCK TABLE ── */
     .section-title {
       font-size: 0.72rem;
@@ -1127,10 +1100,6 @@
       #bt-symbol-custom { width: 100% !important; }
       #bt-run-btn, #bt-scan-btn { width: 100%; }
 
-      /* ── API NOTICE ── */
-      .api-notice { flex-wrap: wrap; gap: 6px; }
-      .api-notice input { width: 100%; max-width: 100%; }
-
       /* ── BACKTEST RESULTS ── */
       .bt-results { grid-template-columns: 1fr 1fr !important; }
       .bt-comparison { grid-template-columns: 1fr !important; }
@@ -1497,14 +1466,6 @@
 
   <!-- ═══ DASHBOARD PAGE ═══ -->
   <div class="page" id="page-dashboard">
-
-    <!-- API Key — only needed when no server connection -->
-    <div class="api-notice" id="apiKeyNotice">
-      🔑 <span>FMP API Key:</span>
-      <input type="password" id="apiKeyInput" placeholder="Paste your FMP API key (fallback)" />
-      <input type="password" id="appTokenInput" placeholder="App token (for server)" style="margin-left:4px" />
-      <button class="btn" onclick="saveKey()">Save</button>
-    </div>
 
     <!-- Add symbol -->
     <div class="watchlist-bar">
@@ -2114,17 +2075,8 @@
   // ══════════════════════════════════════════
   //  STATE
   // ══════════════════════════════════════════
-  let API_KEY = localStorage.getItem('fmp_key') || '';
   let watchlist = JSON.parse(localStorage.getItem('watchlist') || '["AAPL","NVDA","MSFT"]');
   let stockData = {}; // symbol -> fetched data
-
-  // Pre-fill key input if saved
-  if (API_KEY) document.getElementById('apiKeyInput').value = API_KEY;
-  const savedToken = localStorage.getItem('app_token');
-  if (savedToken) {
-    const tokenInput = document.getElementById('appTokenInput');
-    if (tokenInput) tokenInput.value = savedToken;
-  }
 
   // ══════════════════════════════════════════
   //  NAV
@@ -2139,12 +2091,12 @@
     }
     if (name === 'practice') {
       initPracticeAccounts();
-      if (API_KEY || serverAvailable) {
+      if (serverAvailable) {
         refreshPracticePrices();
         refreshPracticeSignals();
       }
     }
-    if (name === 'portfolio' && API_KEY && openPositions.length > 0) {
+    if (name === 'portfolio' && serverAvailable && openPositions.length > 0) {
       const syms = [...new Set(openPositions.map(p => p.sym))];
       const needsLoad = syms.some(s => !stockData[s]);
       if (needsLoad) refreshPortfolioSignals();
@@ -2153,15 +2105,15 @@
       localStorage.setItem('slog_last_visit', Date.now());
       updateSlogBadge();
       renderSlog();
-      if (API_KEY) autoRefreshForSlog();
+      if (serverAvailable) autoRefreshForSlog();
     }
     if (name === 'admin') {
       loadAdminUsers();
     }
-    if (name === 'screener' && !screenerData.length && (API_KEY || serverAvailable)) {
+    if (name === 'screener' && !screenerData.length && serverAvailable) {
       loadScreener();
     }
-    if (name === 'overview' && !overviewLoaded && (API_KEY || serverAvailable)) {
+    if (name === 'overview' && !overviewLoaded && serverAvailable) {
       loadOverview();
     }
   }
@@ -2194,21 +2146,6 @@
       ]);
       return wl.ok && pr.ok && po.ok;
     } catch(e) { console.warn('Sync failed:', e.message); return false; }
-  }
-
-  function saveKey() {
-    const val   = document.getElementById('apiKeyInput').value.trim();
-    const token = document.getElementById('appTokenInput')?.value.trim();
-    if (val) {
-      API_KEY = val;
-      localStorage.setItem('fmp_key', val);
-    }
-    if (token) {
-      localStorage.setItem('app_token', token);
-      // Reload to reconnect with new token
-      checkServerHealth();
-    }
-    refreshAll();
   }
 
   // ══════════════════════════════════════════
@@ -2425,27 +2362,14 @@
   const APP_TOKEN = sessionStorage.getItem('ml_token') || localStorage.getItem('ml_token') || localStorage.getItem('app_token') || '';
   let   serverAvailable = null; // null=unknown, true/false
 
-  // Smart fetch — tries server first, falls back to FMP directly
-  async function smartFetch(serverPath, fmpPath) {
-    // Try server if we think it's available
-    if (serverAvailable !== false && APP_TOKEN) {
-      try {
-        const res = await fetch(`${SERVER_URL}${serverPath}`, {
-          headers: { 'x-app-token': APP_TOKEN },
-          signal: AbortSignal.timeout(5000), // 5s timeout
-        });
-        if (res.ok) {
-          serverAvailable = true;
-          return res.json();
-        }
-      } catch(e) {
-        console.warn('Server unavailable, falling back to FMP:', e.message);
-        serverAvailable = false;
-      }
-    }
-    // Fallback: direct FMP call
-    if (!API_KEY) throw new Error('No server connection and no API key');
-    const res = await fetch(`${BASE}${fmpPath}&apikey=${API_KEY}`);
+  // Smart fetch — server only (browser never calls FMP directly)
+  async function smartFetch(serverPath) {
+    const res = await fetch(`${SERVER_URL}${serverPath}`, {
+      headers: { 'x-app-token': APP_TOKEN },
+      signal: AbortSignal.timeout(5000), // 5s timeout
+    });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    serverAvailable = true;
     return res.json();
   }
 
@@ -2458,21 +2382,19 @@
         console.log('✅ Server connected:', data);
         document.getElementById('marketStatusText').textContent = 'SERVER';
         document.querySelector('.dot').style.background = 'var(--accent)';
-        // Hide API key notice — not needed when server is connected
-        const notice = document.getElementById('apiKeyNotice');
-        if (notice) notice.style.display = 'none';
         return true;
       }
     } catch {}
     serverAvailable = false;
-    console.log('ℹ️ Server not available — using direct FMP');
+    console.warn('⚠️ Server unreachable');
+    document.getElementById('marketStatusText').textContent = 'OFFLINE';
+    document.querySelector('.dot').style.background = 'var(--danger)';
+    toast('Server unreachable, please try again', 'error');
     return false;
   }
 
-  const BASE = 'https://financialmodelingprep.com/stable';
-
   async function fetchAndRender(sym, forceRefresh = false) {
-    if (!API_KEY && !serverAvailable) { alert('Please save your API key first.'); return; }
+    if (!serverAvailable) { alert('Server unreachable, please try again.'); return; }
 
     // Serve from cache if fresh
     if (!forceRefresh) {
@@ -2501,40 +2423,20 @@
 
     showLoading(sym);
     try {
-      let quote, grades, target, history;
-
-      if (serverAvailable && APP_TOKEN) {
-        // Use server endpoints
-        const headers = { 'x-app-token': APP_TOKEN };
-        const from60  = new Date(); from60.setDate(from60.getDate() - 70);
-        const from60Str = from60.toISOString().slice(0, 10);
-        [quote, grades, target, history] = await Promise.all([
-          fetch(`${SERVER_URL}/api/quote/${sym}`,   { headers }).then(r => r.json()),
-          fetch(`${SERVER_URL}/api/grades/${sym}`,  { headers }).then(r => r.json()),
-          fetch(`${SERVER_URL}/api/target/${sym}`,  { headers }).then(r => r.json()),
-          fetch(`${SERVER_URL}/api/history/${sym}?from=${from60Str}`, { headers }).then(r => r.json()),
-        ]);
-        // Normalize — server returns objects directly, FMP returns arrays
-        if (Array.isArray(quote))   quote   = quote[0]   || null;
-        if (Array.isArray(target))  target  = target[0]  || null;
-        if (!Array.isArray(grades)) grades  = grades ? [grades] : [];
-        if (!Array.isArray(history)) history = history?.historical || [];
-      } else {
-        // Direct FMP fallback
-        if (!API_KEY) { showError(sym, 'No connection'); return; }
-        const from60  = new Date(); from60.setDate(from60.getDate() - 70);
-        const from60Str = from60.toISOString().slice(0, 10);
-        const [quoteRes, gradesRes, targetRes, histRes] = await Promise.all([
-          fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-          fetch(`${BASE}/grades?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-          fetch(`${BASE}/price-target-consensus?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-          fetch(`${BASE}/historical-price-eod/full?symbol=${sym}&from=${from60Str}&apikey=${API_KEY}`).then(r => r.json()),
-        ]);
-        quote   = Array.isArray(quoteRes)  ? quoteRes[0]  : quoteRes;
-        target  = Array.isArray(targetRes) ? targetRes[0] : targetRes;
-        grades  = Array.isArray(gradesRes) ? gradesRes    : [];
-        history = histRes?.historical || (Array.isArray(histRes) ? histRes : []);
-      }
+      const headers = { 'x-app-token': APP_TOKEN };
+      const from60  = new Date(); from60.setDate(from60.getDate() - 70);
+      const from60Str = from60.toISOString().slice(0, 10);
+      let [quote, grades, target, history] = await Promise.all([
+        fetch(`${SERVER_URL}/api/quote/${sym}`,   { headers }).then(r => r.json()),
+        fetch(`${SERVER_URL}/api/grades/${sym}`,  { headers }).then(r => r.json()),
+        fetch(`${SERVER_URL}/api/target/${sym}`,  { headers }).then(r => r.json()),
+        fetch(`${SERVER_URL}/api/history/${sym}?from=${from60Str}`, { headers }).then(r => r.json()),
+      ]);
+      // Normalize — server returns objects directly for quote/target
+      if (Array.isArray(quote))   quote   = quote[0]   || null;
+      if (Array.isArray(target))  target  = target[0]  || null;
+      if (!Array.isArray(grades)) grades  = grades ? [grades] : [];
+      if (!Array.isArray(history)) history = [];
 
       if (quote)        cacheSet(`quote_${sym}`,   quote);
       if (grades.length) cacheSet(`grades_${sym}`, grades);
@@ -2562,7 +2464,7 @@
   }
 
   async function refreshAll(forceRefresh = false) {
-    if (!API_KEY && !serverAvailable) { alert('Please save your API key first.'); return; }
+    if (!serverAvailable) { alert('Server unreachable, please try again.'); return; }
     stockData = {};
     renderAll();
     for (const sym of watchlist) {
@@ -2946,36 +2848,22 @@
   }
 
   async function loadScreener() {
-    if (!API_KEY && !serverAvailable) { alert('Please save your API key first.'); return; }
+    if (!serverAvailable) { alert('Server unreachable, please try again.'); return; }
     const list = document.getElementById('screenerList');
     list.innerHTML = `<div class="loading-card"><div class="spinner"></div> Loading analyst feed…</div>`;
     try {
-      // Try server first (has accumulated history!)
-      if (serverAvailable && APP_TOKEN) {
-        const res = await fetch(`${SERVER_URL}/api/screener`, {
-          headers: { 'x-app-token': APP_TOKEN }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          // Map upsideData from server enrichment
-          data.forEach(item => {
-            if (item.upsideData?.upside !== undefined && item.upsideData?.upside !== null) {
-              screenerUpside[item.symbol] = item.upsideData.upside;
-            }
-          });
-          screenerData = data;
-          renderScreener(); // render with upside already populated
-          markVisited();
-          return;
-        } else {
-          console.warn('Server screener failed:', res.status);
+      const res = await fetch(`${SERVER_URL}/api/screener`, {
+        headers: { 'x-app-token': APP_TOKEN }
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const data = await res.json();
+      // Map upsideData from server enrichment
+      data.forEach(item => {
+        if (item.upsideData?.upside !== undefined && item.upsideData?.upside !== null) {
+          screenerUpside[item.symbol] = item.upsideData.upside;
         }
-      }
-      // Fallback: direct FMP
-      if (!API_KEY) { list.innerHTML = `<div class="loading-card">⚠️ No API key or server connection</div>`; return; }
-      const res = await fetch(`${BASE}/grades-latest-news?limit=100&apikey=${API_KEY}`);
-      screenerData = await res.json();
-      screenerUpside = {};
+      });
+      screenerData = data;
       renderScreener();
       markVisited();
     } catch(e) {
@@ -2984,33 +2872,23 @@
   }
 
   async function enrichAll() {
-    if (!API_KEY && !serverAvailable) return;
+    if (!serverAvailable) return;
     const btn = document.getElementById('enrichBtn');
     btn.textContent = '⏳ Loading…';
     btn.disabled = true;
 
     const symbols = [...new Set((Array.isArray(screenerData) ? screenerData : []).map(r => r.symbol))];
+    const headers = { 'x-app-token': APP_TOKEN };
 
     const batchSize = 5;
     for (let i = 0; i < symbols.length; i += batchSize) {
       const batch = symbols.slice(i, i + batchSize);
       await Promise.all(batch.map(async sym => {
         try {
-          let quote, target;
-          if (serverAvailable && APP_TOKEN) {
-            const headers = { 'x-app-token': APP_TOKEN };
-            [quote, target] = await Promise.all([
-              fetch(`${SERVER_URL}/api/quote/${sym}`,  { headers }).then(r => r.json()),
-              fetch(`${SERVER_URL}/api/target/${sym}`, { headers }).then(r => r.json()),
-            ]);
-          } else {
-            const [qr, tr] = await Promise.all([
-              fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-              fetch(`${BASE}/price-target-consensus?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-            ]);
-            quote  = Array.isArray(qr) ? qr[0] : qr;
-            target = Array.isArray(tr) ? tr[0] : tr;
-          }
+          const [quote, target] = await Promise.all([
+            fetch(`${SERVER_URL}/api/quote/${sym}`,  { headers }).then(r => r.json()),
+            fetch(`${SERVER_URL}/api/target/${sym}`, { headers }).then(r => r.json()),
+          ]);
           if (quote?.price && target?.targetConsensus) {
             screenerUpside[sym] = ((target.targetConsensus - quote.price) / quote.price * 100);
           } else {
@@ -3221,17 +3099,11 @@
       try {
         const from    = new Date(); from.setDate(from.getDate() - days);
         const fromStr = from.toISOString().slice(0, 10);
-        let data;
-        if (serverAvailable && APP_TOKEN) {
-          const res = await fetch(`${SERVER_URL}/api/history/${sym}?from=${fromStr}`, {
-            headers: { 'x-app-token': APP_TOKEN }
-          });
-          data = await res.json();
-        } else {
-          const res = await fetch(`${BASE}/historical-price-eod/full?symbol=${sym}&from=${fromStr}&apikey=${API_KEY}`);
-          data = await res.json();
-        }
-        history = Array.isArray(data) ? [...data].reverse() : (data?.historical || []).reverse();
+        const res = await fetch(`${SERVER_URL}/api/history/${sym}?from=${fromStr}`, {
+          headers: { 'x-app-token': APP_TOKEN }
+        });
+        const data = await res.json();
+        history = Array.isArray(data) ? data : [];
         if (history.length) {
           chartCache[cacheKey] = history;
           cacheSet(`chart_${cacheKey}`, history);
@@ -3416,33 +3288,18 @@
 
   async function loadDrawerData(sym) {
     try {
-      let quote, grades, target, earnings;
-
-      if (serverAvailable && APP_TOKEN) {
-        const headers = { 'x-app-token': APP_TOKEN };
-        [quote, grades, target, earnings] = await Promise.all([
-          fetch(`${SERVER_URL}/api/quote/${sym}`,    { headers }).then(r => r.json()).catch(() => null),
-          fetch(`${SERVER_URL}/api/grades/${sym}`,   { headers }).then(r => r.json()).catch(() => []),
-          fetch(`${SERVER_URL}/api/target/${sym}`,   { headers }).then(r => r.json()).catch(() => null),
-          fetch(`${SERVER_URL}/api/earnings/${sym}`, { headers }).then(r => r.json()).catch(() => []),
-        ]);
-        // Normalize
-        if (Array.isArray(quote))    quote    = quote[0]   || null;
-        if (Array.isArray(target))   target   = target[0]  || null;
-        if (!Array.isArray(grades))  grades   = [];
-        if (!Array.isArray(earnings)) earnings = [];
-      } else {
-        const [quoteRes, gradesRes, targetRes, earningsRes] = await Promise.all([
-          fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-          fetch(`${BASE}/grades?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-          fetch(`${BASE}/price-target-consensus?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()),
-          fetch(`${BASE}/earnings?symbol=${sym}&apikey=${API_KEY}`).then(r => r.json()).catch(() => []),
-        ]);
-        quote    = Array.isArray(quoteRes)    ? quoteRes[0]    : null;
-        target   = Array.isArray(targetRes)   ? targetRes[0]   : null;
-        grades   = Array.isArray(gradesRes)   ? gradesRes      : [];
-        earnings = Array.isArray(earningsRes) ? earningsRes    : [];
-      }
+      const headers = { 'x-app-token': APP_TOKEN };
+      let [quote, grades, target, earnings] = await Promise.all([
+        fetch(`${SERVER_URL}/api/quote/${sym}`,    { headers }).then(r => r.json()).catch(() => null),
+        fetch(`${SERVER_URL}/api/grades/${sym}`,   { headers }).then(r => r.json()).catch(() => []),
+        fetch(`${SERVER_URL}/api/target/${sym}`,   { headers }).then(r => r.json()).catch(() => null),
+        fetch(`${SERVER_URL}/api/earnings/${sym}`, { headers }).then(r => r.json()).catch(() => []),
+      ]);
+      // Normalize
+      if (Array.isArray(quote))    quote    = quote[0]   || null;
+      if (Array.isArray(target))   target   = target[0]  || null;
+      if (!Array.isArray(grades))  grades   = [];
+      if (!Array.isArray(earnings)) earnings = [];
 
       // Next earnings = first where epsActual is null (future)
       const today = new Date();
@@ -3504,21 +3361,13 @@
       const historicalPrices = {};
       await Promise.all(uniqueDates.map(async date => {
         try {
-          let arr;
-          if (serverAvailable && APP_TOKEN) {
-            const r = await fetch(`${SERVER_URL}/api/history/${sym}?from=${date}`, {
-              headers: { 'x-app-token': APP_TOKEN }
-            });
-            const d = await r.json();
-            arr = Array.isArray(d) ? d : d?.historical;
-          } else {
-            const r = await fetch(`${BASE}/historical-price-eod/full?symbol=${sym}&from=${date}&to=${date}&apikey=${API_KEY}`);
-            const d = await r.json();
-            arr = d?.historical || d;
-          }
-          // Find entry matching the target date (array is newest-first)
+          const r = await fetch(`${SERVER_URL}/api/history/${sym}?from=${date}`, {
+            headers: { 'x-app-token': APP_TOKEN }
+          });
+          const arr = await r.json();
+          // Find entry matching the target date, else nearest available (array is oldest-first)
           const entry = Array.isArray(arr)
-            ? arr.find(r => r.date === date) || arr[arr.length - 1] // exact date or oldest
+            ? arr.find(r => r.date === date) || arr[0]
             : null;
           if (entry?.close) {
             historicalPrices[date] = entry.close;
@@ -3829,7 +3678,7 @@
   }
 
   async function refreshPortfolioSignals() {
-    if (!API_KEY && !serverAvailable) { alert('Please save your API key first.'); return; }
+    if (!serverAvailable) { alert('Server unreachable, please try again.'); return; }
     const btn = document.getElementById('refreshSignalsBtn');
     if (btn) { btn.textContent = '⏳ Loading…'; btn.disabled = true; }
 
@@ -3954,18 +3803,11 @@
   // ── FETCH LIVE PRICES FOR PORTFOLIO ──
   async function fetchPortfolioPrice(sym) {
     if (livePortfolioPrices[sym]) return;
-    if (!API_KEY && !serverAvailable) return;
+    if (!serverAvailable) return;
     try {
-      let price;
-      if (serverAvailable && APP_TOKEN) {
-        const res  = await fetch(`${SERVER_URL}/api/quote/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
-        const data = await res.json();
-        price = (Array.isArray(data) ? data[0] : data)?.price;
-      } else {
-        const res  = await fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`);
-        const data = await res.json();
-        price = Array.isArray(data) ? data[0]?.price : data?.price;
-      }
+      const res  = await fetch(`${SERVER_URL}/api/quote/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
+      const data = await res.json();
+      const price = (Array.isArray(data) ? data[0] : data)?.price;
       if (price) { livePortfolioPrices[sym] = price; renderPortfolio(); }
     } catch {}
   }
@@ -3975,14 +3817,8 @@
   async function fetchPortfolioEarnings(sym) {
     if (portfolioEarnings[sym] !== undefined) return;
     try {
-      let data;
-      if (serverAvailable && APP_TOKEN) {
-        const res = await fetch(`${SERVER_URL}/api/earnings/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
-        data = await res.json();
-      } else {
-        const res = await fetch(`${BASE}/earnings?symbol=${sym}&apikey=${API_KEY}`);
-        data = await res.json();
-      }
+      const res = await fetch(`${SERVER_URL}/api/earnings/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
+      const data = await res.json();
       const today = new Date();
       portfolioEarnings[sym] = Array.isArray(data)
         ? data.find(e => e.epsActual === null && new Date(e.date) >= today) || null
@@ -4186,11 +4022,6 @@
   // ══════════════════════════════════════════
   //  MARKET OVERVIEW
   // ══════════════════════════════════════════
-  const OVERVIEW_SYMBOLS = {
-    indices:    ['SPY', 'QQQ', 'VXX'],   // VXX as VIX proxy
-    sectors:    ['XBI', 'XPH', 'XLV', 'IWM'],
-    commodities:['USO', 'GLD', 'UUP'],   // UUP = USD index
-  };
   let overviewLoaded = false;
 
   function isMarketOpen() {
@@ -4285,10 +4116,8 @@
   }
 
   async function loadOverview(forceRefresh = false) {
-    if (!API_KEY && !serverAvailable) return;
+    if (!serverAvailable) return;
     updateMarketBanner();
-
-    const allSyms = [...OVERVIEW_SYMBOLS.indices, ...OVERVIEW_SYMBOLS.sectors, ...OVERVIEW_SYMBOLS.commodities];
 
     // Try cache first
     if (!forceRefresh) {
@@ -4301,25 +4130,17 @@
       }
     }
 
-    // Fetch via server or direct FMP
-    const fetchQuote = async (sym) => {
-      if (serverAvailable && APP_TOKEN) {
-        const res = await fetch(`${SERVER_URL}/api/quote/${sym}`, {
-          headers: { 'x-app-token': APP_TOKEN }
-        });
-        return res.ok ? res.json() : null;
-      }
-      const res = await fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`);
-      const d   = await res.json();
-      return Array.isArray(d) ? d[0] : null;
-    };
-
-    const results  = await Promise.all(allSyms.map(sym => fetchQuote(sym).catch(() => null)));
-    const bySymbol = {};
-    allSyms.forEach((sym, i) => { if (results[i]) bySymbol[sym] = results[i]; });
-    cacheSet('overview_data', bySymbol);
-    renderOverviewData(bySymbol);
-    updateStatusIndicator(isMarketOpen() ? 'live' : 'closed');
+    try {
+      const res = await fetch(`${SERVER_URL}/api/overview`, {
+        headers: { 'x-app-token': APP_TOKEN }
+      });
+      const bySymbol = res.ok ? await res.json() : {};
+      cacheSet('overview_data', bySymbol);
+      renderOverviewData(bySymbol);
+      updateStatusIndicator(isMarketOpen() ? 'live' : 'closed');
+    } catch(e) {
+      console.warn('Overview load failed:', e.message);
+    }
     overviewLoaded = true;
   }
 
@@ -4577,7 +4398,7 @@
     renderPractice();
     refreshPracticePrices();
     // Load signals for new account's positions
-    if (API_KEY) {
+    if (serverAvailable) {
       const acc = getCurrentAccount();
       if (acc) {
         const syms = [...new Set(acc.open.map(p => p.sym))].filter(s => !stockData[s]);
@@ -4804,15 +4625,10 @@
 
   // ── PRICES ──
   async function fetchLivePrice(sym) {
-    if (serverAvailable && APP_TOKEN) {
-      const res  = await fetch(`${SERVER_URL}/api/quote/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
-      const data = await res.json();
-      return (Array.isArray(data) ? data[0] : data)?.price || null;
-    }
-    if (!API_KEY) return null;
-    const res  = await fetch(`${BASE}/quote?symbol=${sym}&apikey=${API_KEY}`);
+    if (!serverAvailable) return null;
+    const res  = await fetch(`${SERVER_URL}/api/quote/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
     const data = await res.json();
-    return Array.isArray(data) ? data[0]?.price : data?.price || null;
+    return (Array.isArray(data) ? data[0] : data)?.price || null;
   }
 
   async function fetchPracticePrice(sym) {
@@ -4987,7 +4803,7 @@
     const useTakeProfit = document.getElementById('bt-takeprofit')?.checked;
     const takeProfitPct = useTakeProfit ? parseFloat(document.getElementById('bt-takeprofit-pct').value) || 40 : null;
 
-    if (!API_KEY && !serverAvailable) { alert('Please save your API key first.'); return; }
+    if (!serverAvailable) { alert('Server unreachable, please try again.'); return; }
 
     // Show scan results section
     document.getElementById('bt-scan-results').style.display = 'block';
@@ -5028,37 +4844,17 @@
         const from = new Date();
         from.setFullYear(from.getFullYear() - years);
         const fromStr = from.toISOString().slice(0, 10);
+        const headers = { 'x-app-token': APP_TOKEN };
 
-        const headers = serverAvailable && APP_TOKEN ? { 'x-app-token': APP_TOKEN } : null;
-
-        const fetchS = async (s) => {
-          if (headers) {
-            const res = await fetch(`${SERVER_URL}/api/history/${s}?from=${fromStr}`, { headers });
-            return res.json();
-          }
-          return fetch(`${BASE}/historical-price-eod/full?symbol=${s}&from=${fromStr}&apikey=${API_KEY}`).then(r => r.json());
-        };
-        const fetchG = async (s) => {
-          if (headers) {
-            const res = await fetch(`${SERVER_URL}/api/grades/${s}`, { headers });
-            return res.json();
-          }
-          return fetch(`${BASE}/grades?symbol=${s}&apikey=${API_KEY}`).then(r => r.json());
-        };
-        const fetchT = async (s) => {
-          if (headers) {
-            const res = await fetch(`${SERVER_URL}/api/target/${s}`, { headers });
-            return res.json();
-          }
-          return fetch(`${BASE}/price-target-consensus?symbol=${s}&apikey=${API_KEY}`).then(r => r.json());
-        };
+        const fetchS = (s) => fetch(`${SERVER_URL}/api/history/${s}?from=${fromStr}`, { headers }).then(r => r.json());
+        const fetchG = (s) => fetch(`${SERVER_URL}/api/grades/${s}`, { headers }).then(r => r.json());
+        const fetchT = (s) => fetch(`${SERVER_URL}/api/target/${s}`, { headers }).then(r => r.json());
 
         const [histRes, xbiRes, gradesRes, targetRes] = await Promise.all([
           fetchS(sym), fetchS('XBI'), fetchG(sym), fetchT(sym),
         ]);
 
-        const parseHist = (res) => Array.isArray(res) ? [...res].reverse()
-          : res?.historical ? [...res.historical].reverse() : [];
+        const parseHist = (res) => Array.isArray(res) ? res : [];
 
         const history = parseHist(histRes);
         const xbiHist = parseHist(xbiRes);
@@ -5210,7 +5006,7 @@
     const symSelect = document.getElementById('bt-symbol');
     const sym = customSym || symSelect.value;
     if (!sym) { alert('Please select or type a symbol.'); return; }
-    if (!API_KEY && !serverAvailable) { alert('No server connection or API key.'); return; }
+    if (!serverAvailable) { alert('Server unreachable, please try again.'); return; }
     const years   = parseInt(document.getElementById('bt-period').value);
     const capital = parseFloat(document.getElementById('bt-capital').value) || 200;
     const btn     = document.getElementById('bt-run-btn');
@@ -5224,42 +5020,17 @@
       from.setFullYear(from.getFullYear() - years);
       const fromStr = from.toISOString().slice(0, 10);
 
-      // Fetch via server or direct FMP
-      const fetchHist = async (s) => {
-        if (serverAvailable && APP_TOKEN) {
-          const res = await fetch(`${SERVER_URL}/api/history/${s}?from=${fromStr}`, {
-            headers: { 'x-app-token': APP_TOKEN }
-          });
-          return res.json();
-        }
-        return fetch(`${BASE}/historical-price-eod/full?symbol=${s}&from=${fromStr}&apikey=${API_KEY}`).then(r => r.json());
-      };
-      const fetchGrades = async (s) => {
-        if (serverAvailable && APP_TOKEN) {
-          const res = await fetch(`${SERVER_URL}/api/grades/${s}`, { headers: { 'x-app-token': APP_TOKEN } });
-          return res.json();
-        }
-        return fetch(`${BASE}/grades?symbol=${s}&apikey=${API_KEY}`).then(r => r.json());
-      };
-      const fetchTarget = async (s) => {
-        if (serverAvailable && APP_TOKEN) {
-          const res = await fetch(`${SERVER_URL}/api/target/${s}`, { headers: { 'x-app-token': APP_TOKEN } });
-          return res.json();
-        }
-        return fetch(`${BASE}/price-target-consensus?symbol=${s}&apikey=${API_KEY}`).then(r => r.json());
-      };
+      const headers = { 'x-app-token': APP_TOKEN };
+      const fetchHist   = (s) => fetch(`${SERVER_URL}/api/history/${s}?from=${fromStr}`, { headers }).then(r => r.json());
+      const fetchGrades = (s) => fetch(`${SERVER_URL}/api/grades/${s}`, { headers }).then(r => r.json());
+      const fetchTarget = (s) => fetch(`${SERVER_URL}/api/target/${s}`, { headers }).then(r => r.json());
 
       const [histRes, xbiRes, spyRes, gradesRes, targetRes] = await Promise.all([
         fetchHist(sym), fetchHist('XBI'), fetchHist('SPY'),
         fetchGrades(sym), fetchTarget(sym),
       ]);
 
-      const parseHist = (res) => {
-        if (Array.isArray(res)) return [...res].reverse();
-        if (res?.historical && Array.isArray(res.historical)) return [...res.historical].reverse();
-        console.warn('Unknown history format:', JSON.stringify(res)?.slice(0, 100));
-        return [];
-      };
+      const parseHist = (res) => Array.isArray(res) ? res : [];
 
       const history = parseHist(histRes);
       const xbiHist = parseHist(xbiRes);
@@ -5676,9 +5447,9 @@
   }
 
   async function checkScreenerForUpgrades() {
-    if (!API_KEY) return;
+    if (!serverAvailable) return;
     try {
-      const res  = await fetch(`${BASE}/grades-latest-news?limit=100&apikey=${API_KEY}`);
+      const res  = await fetch(`${SERVER_URL}/api/screener`, { headers: { 'x-app-token': APP_TOKEN } });
       const data = await res.json();
       if (!Array.isArray(data)) return;
 
@@ -5776,10 +5547,8 @@
         }
       } catch(e) { console.warn('Could not load from server:', e.message); }
     }
-    if (API_KEY || serverAvailable) {
+    if (connected) {
       loadOverview();
-    }
-    if (API_KEY) {
       if (watchlist.length > 0) refreshAll();
       refreshPortfolioPrices();
       setTimeout(() => {
