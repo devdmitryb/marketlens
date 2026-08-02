@@ -200,12 +200,18 @@ app.get('/api/screener', auth, async (req, res) => {
 
 // Quote — serve from cache, refresh if stale
 app.get('/api/quote/:sym', auth, async (req, res) => {
-  const sym    = req.params.sym.toUpperCase();
-  const quotes = store.read('quotes', {});
-  const cached = quotes[sym];
+  const sym = req.params.sym.toUpperCase();
 
   // Stale if older than 15 min during market hours, 4h otherwise
   const ttl = isMarketOpen() ? 15 * 60 * 1000 : 4 * 60 * 60 * 1000;
+
+  let cached;
+  try {
+    cached = await db.getCachedQuote(sym);
+  } catch(e) {
+    console.error(`[db] getCachedQuote failed for ${sym}:`, e.message);
+    cached = null;
+  }
   const age = cached ? Date.now() - new Date(cached.cachedAt).getTime() : Infinity;
 
   if (cached && age < ttl) {
@@ -215,8 +221,11 @@ app.get('/api/quote/:sym', auth, async (req, res) => {
   try {
     const quote = await fmp.getQuote(sym);
     if (quote) {
-      quotes[sym] = { ...quote, cachedAt: new Date().toISOString() };
-      store.write('quotes', quotes);
+      try {
+        await db.setCachedQuote(sym, quote);
+      } catch(e) {
+        console.error(`[db] setCachedQuote failed for ${sym}:`, e.message);
+      }
     }
     res.json({ ...quote, fromCache: false });
   } catch(e) {
@@ -225,24 +234,66 @@ app.get('/api/quote/:sym', auth, async (req, res) => {
   }
 });
 
-// Grades for a symbol
+// Grades for a symbol — serve from cache (6h TTL), refresh if stale
 app.get('/api/grades/:sym', auth, async (req, res) => {
   const sym = req.params.sym.toUpperCase();
+  const ttl = 6 * 60 * 60 * 1000;
+
+  let cached;
+  try {
+    cached = await db.getCachedGrades(sym);
+  } catch(e) {
+    console.error(`[db] getCachedGrades failed for ${sym}:`, e.message);
+    cached = null;
+  }
+  const age = cached ? Date.now() - new Date(cached.cachedAt).getTime() : Infinity;
+
+  if (cached && age < ttl) {
+    return res.json(cached.data);
+  }
+
   try {
     const data = await fmp.getGrades(sym);
+    try {
+      await db.setCachedGrades(sym, data);
+    } catch(e) {
+      console.error(`[db] setCachedGrades failed for ${sym}:`, e.message);
+    }
     res.json(data);
   } catch(e) {
+    if (cached) return res.json(cached.data);
     res.status(500).json({ error: e.message });
   }
 });
 
-// Price target
+// Price target — serve from cache (6h TTL), refresh if stale
 app.get('/api/target/:sym', auth, async (req, res) => {
   const sym = req.params.sym.toUpperCase();
+  const ttl = 6 * 60 * 60 * 1000;
+
+  let cached;
+  try {
+    cached = await db.getCachedTarget(sym);
+  } catch(e) {
+    console.error(`[db] getCachedTarget failed for ${sym}:`, e.message);
+    cached = null;
+  }
+  const age = cached ? Date.now() - new Date(cached.cachedAt).getTime() : Infinity;
+
+  if (cached && age < ttl) {
+    return res.json(cached.data);
+  }
+
   try {
     const data = await fmp.getTarget(sym);
+    try {
+      await db.setCachedTarget(sym, data);
+    } catch(e) {
+      console.error(`[db] setCachedTarget failed for ${sym}:`, e.message);
+    }
     res.json(data);
   } catch(e) {
+    if (cached) return res.json(cached.data);
     res.status(500).json({ error: e.message });
   }
 });
