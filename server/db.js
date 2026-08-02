@@ -419,9 +419,13 @@ async function setCachedTarget(symbol, data) {
 }
 
 // Price history
+// Date is cast to text via TO_CHAR — otherwise `pg` parses the DATE column into
+// a JS Date object, which JSON.stringify then renders as a full ISO timestamp
+// ("2023-08-02T00:00:00.000Z") instead of the plain "YYYY-MM-DD" callers expect
 async function getHistory(symbol, fromDate) {
   const res = await pool.query(
-    'SELECT symbol, date, open, high, low, close, volume FROM price_history WHERE symbol = $1 AND date >= $2 ORDER BY date ASC',
+    `SELECT symbol, TO_CHAR(date, 'YYYY-MM-DD') AS date, open, high, low, close, volume
+     FROM price_history WHERE symbol = $1 AND date >= $2 ORDER BY date ASC`,
     [symbol, fromDate]
   );
   return res.rows;
