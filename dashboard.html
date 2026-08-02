@@ -3672,8 +3672,11 @@
   let livePortfolioPrices = {}; // symbol -> current price
 
   function savePortfolio() {
-    localStorage.setItem('portfolio_open',   JSON.stringify(openPositions));
-    localStorage.setItem('portfolio_closed', JSON.stringify(closedPositions));
+    // portfolio_closed grows unboundedly and is already the source of truth in
+    // Postgres via syncToServer() below — don't keep a full copy in localStorage
+    try { localStorage.setItem('portfolio_open', JSON.stringify(openPositions)); }
+    catch(e) { console.warn('portfolio_open cache write failed:', e.message); }
+    try { localStorage.removeItem('portfolio_closed'); } catch(e) {}
     syncToServer();
   }
 
@@ -4350,8 +4353,20 @@
   let currentPracticeId = localStorage.getItem('practice_current') || null;
   let livePracticePrices = {};
 
+  // Lightweight cache — full trade history lives in Postgres (synced via
+  // syncToServer below); localStorage only needs names/balances/open positions
+  // to render before that server round-trip completes on next page load
+  function practiceAccountsLite(accounts) {
+    return accounts.map(a => ({
+      id: a.id, name: a.name, capital: a.capital, cash: a.cash,
+      commission: a.commission, created: a.created,
+      open: a.open || [], closed: [], trades: [],
+    }));
+  }
+
   function savePracticeAccounts() {
-    localStorage.setItem('practice_accounts', JSON.stringify(practiceAccounts));
+    try { localStorage.setItem('practice_accounts', JSON.stringify(practiceAccountsLite(practiceAccounts))); }
+    catch(e) { console.warn('practice_accounts cache write failed:', e.message); }
     syncToServer();
   }
 
@@ -5535,7 +5550,8 @@
           const serverPractice = await prRes.json();
           if (Array.isArray(serverPractice) && serverPractice.length > 0) {
             practiceAccounts = serverPractice;
-            localStorage.setItem('practice_accounts', JSON.stringify(practiceAccounts));
+            try { localStorage.setItem('practice_accounts', JSON.stringify(practiceAccountsLite(practiceAccounts))); }
+            catch(e) { console.warn('practice_accounts cache write failed:', e.message); }
           }
         }
         // Load portfolio from server
@@ -5545,8 +5561,9 @@
           if (serverPort?.open?.length > 0 || serverPort?.closed?.length > 0) {
             openPositions   = serverPort.open   || [];
             closedPositions = serverPort.closed || [];
-            localStorage.setItem('portfolio_open',   JSON.stringify(openPositions));
-            localStorage.setItem('portfolio_closed', JSON.stringify(closedPositions));
+            try { localStorage.setItem('portfolio_open', JSON.stringify(openPositions)); }
+            catch(e) { console.warn('portfolio_open cache write failed:', e.message); }
+            try { localStorage.removeItem('portfolio_closed'); } catch(e) {}
           }
         }
       } catch(e) { console.warn('Could not load from server:', e.message); }
