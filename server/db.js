@@ -92,6 +92,25 @@ async function initSchema() {
         data       JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS price_history (
+        symbol      TEXT NOT NULL,
+        date        DATE NOT NULL,
+        open        NUMERIC,
+        high        NUMERIC,
+        low         NUMERIC,
+        close       NUMERIC NOT NULL,
+        volume      BIGINT,
+        updated_at  TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (symbol, date)
+      );
+      CREATE INDEX IF NOT EXISTS price_history_symbol_date_idx ON price_history(symbol, date DESC);
+
+      CREATE TABLE IF NOT EXISTS earnings_cache (
+        symbol     TEXT PRIMARY KEY,
+        data       JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
 
     await migrateToMultiUser(client);
@@ -399,6 +418,50 @@ async function setCachedTarget(symbol, data) {
   `, [symbol, JSON.stringify(data)]);
 }
 
+// Price history
+async function getHistory(symbol, fromDate) {
+  const res = await pool.query(
+    'SELECT symbol, date, open, high, low, close, volume FROM price_history WHERE symbol = $1 AND date >= $2 ORDER BY date ASC',
+    [symbol, fromDate]
+  );
+  return res.rows;
+}
+
+async function upsertHistory(symbol, rows) {
+  if (!rows || !rows.length) return;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const row of rows) {
+      await client.query(`
+        INSERT INTO price_history (symbol, date, open, high, low, close, volume, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        ON CONFLICT (symbol, date) DO UPDATE SET
+          open = $3, high = $4, low = $5, close = $6, volume = $7, updated_at = NOW()
+      `, [symbol, row.date, row.open, row.high, row.low, row.close, row.volume]);
+    }
+    await client.query('COMMIT');
+  } catch(e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// Earnings cache
+async function getCachedEarnings(symbol) {
+  const res = await pool.query('SELECT data, updated_at FROM earnings_cache WHERE symbol = $1', [symbol]);
+  return res.rows[0] ? { data: res.rows[0].data, cachedAt: res.rows[0].updated_at } : null;
+}
+
+async function setCachedEarnings(symbol, data) {
+  await pool.query(`
+    INSERT INTO earnings_cache (symbol, data, updated_at) VALUES ($1, $2, NOW())
+    ON CONFLICT (symbol) DO UPDATE SET data = $2, updated_at = NOW()
+  `, [symbol, JSON.stringify(data)]);
+}
+
 module.exports = {
   pool,
   initSchema,
@@ -413,4 +476,6 @@ module.exports = {
   getCachedQuote,  setCachedQuote,
   getCachedGrades, setCachedGrades,
   getCachedTarget, setCachedTarget,
+  getHistory, upsertHistory,
+  getCachedEarnings, setCachedEarnings,
 };
