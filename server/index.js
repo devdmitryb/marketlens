@@ -298,27 +298,98 @@ app.get('/api/target/:sym', auth, async (req, res) => {
   }
 });
 
-// Historical prices
+// Historical prices — serve from price_history, lazily backfill on insufficient coverage
 app.get('/api/history/:sym', auth, async (req, res) => {
   const sym  = req.params.sym.toUpperCase();
   const from = req.query.from || (() => {
     const d = new Date(); d.setFullYear(d.getFullYear() - 1);
     return d.toISOString().slice(0, 10);
   })();
+
   try {
-    const data = await fmp.getHistory(sym, from);
-    res.json(data);
+    let rows = await db.getHistory(sym, from);
+
+    // Coverage check — do the cached rows span at least 80% of the requested range?
+    const fromDate = new Date(from);
+    const today = new Date();
+    const requestedDays = Math.max(1, Math.round((today - fromDate) / (1000 * 60 * 60 * 24)));
+    const earliest = rows.length ? new Date(rows[0].date) : null;
+    const latest   = rows.length ? new Date(rows[rows.length - 1].date) : null;
+    const coveredDays = earliest && latest
+      ? Math.round((latest - earliest) / (1000 * 60 * 60 * 24))
+      : 0;
+    const coverageOk = rows.length > 0 && coveredDays >= requestedDays * 0.8;
+
+    if (!coverageOk) {
+      const fresh = await fmp.getHistory(sym, from);
+      const freshRows = (fresh || [])
+        .map(d => ({ date: d.date, open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume }))
+        .filter(r => r.date && r.close != null);
+      if (freshRows.length) {
+        try {
+          await db.upsertHistory(sym, freshRows);
+          rows = await db.getHistory(sym, from);
+        } catch(e) {
+          console.error(`[db] upsertHistory failed for ${sym}:`, e.message);
+        }
+      }
+    }
+
+    res.json(rows);
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// Earnings
+// Earnings — serve from cache (24h TTL), refresh if stale
 app.get('/api/earnings/:sym', auth, async (req, res) => {
   const sym = req.params.sym.toUpperCase();
+  const ttl = 24 * 60 * 60 * 1000;
+
+  let cached;
+  try {
+    cached = await db.getCachedEarnings(sym);
+  } catch(e) {
+    console.error(`[db] getCachedEarnings failed for ${sym}:`, e.message);
+    cached = null;
+  }
+  const age = cached ? Date.now() - new Date(cached.cachedAt).getTime() : Infinity;
+
+  if (cached && age < ttl) {
+    return res.json(cached.data);
+  }
+
   try {
     const data = await fmp.getEarnings(sym);
+    try {
+      await db.setCachedEarnings(sym, data);
+    } catch(e) {
+      console.error(`[db] setCachedEarnings failed for ${sym}:`, e.message);
+    }
     res.json(data);
+  } catch(e) {
+    if (cached) return res.json(cached.data);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Overview — cached quotes for fixed index/sector/commodity benchmark symbols
+const OVERVIEW_SYMBOLS = ['SPY', 'QQQ', 'VXX', 'XBI', 'XPH', 'XLV', 'IWM', 'USO', 'GLD', 'UUP'];
+
+app.get('/api/overview', auth, async (req, res) => {
+  try {
+    const entries = await Promise.all(OVERVIEW_SYMBOLS.map(async sym => {
+      try {
+        const cached = await db.getCachedQuote(sym);
+        return [sym, cached || null];
+      } catch(e) {
+        console.error(`[db] getCachedQuote failed for ${sym}:`, e.message);
+        return [sym, null];
+      }
+    }));
+    const bySymbol = {};
+    entries.forEach(([sym, data]) => { if (data) bySymbol[sym] = data; });
+    res.json(bySymbol);
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
