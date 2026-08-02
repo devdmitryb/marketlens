@@ -380,8 +380,19 @@ app.get('/api/overview', auth, async (req, res) => {
   try {
     const entries = await Promise.all(OVERVIEW_SYMBOLS.map(async sym => {
       try {
-        const cached = await db.getCachedQuote(sym);
-        return [sym, cached || null];
+        let cached = await db.getCachedQuote(sym);
+        if (!cached) {
+          const quote = await fmp.getQuote(sym);
+          if (quote) {
+            try {
+              await db.setCachedQuote(sym, quote);
+            } catch(e) {
+              console.error(`[db] setCachedQuote failed for ${sym}:`, e.message);
+            }
+          }
+          cached = quote || null;
+        }
+        return [sym, cached];
       } catch(e) {
         console.error(`[db] getCachedQuote failed for ${sym}:`, e.message);
         return [sym, null];

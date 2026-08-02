@@ -479,12 +479,13 @@ function startCronJobs() {
 
   console.log('[cron] Jobs scheduled ✅');
 
-  // Run immediately on startup
+  // Run immediately on startup — benchmarks before watched symbols so
+  // /api/overview has data cached before anyone hits it post-deploy
   setTimeout(async () => {
     await collectScreenerFeed();
     await enrichScreenerUpside();
-    await refreshWatchedSymbols();
     await refreshBenchmarkSymbols();
+    await refreshWatchedSymbols();
   }, 3000);
 }
 
