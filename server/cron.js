@@ -321,9 +321,13 @@ async function enrichScreenerUpside() {
         fmp.getQuote(sym),
         fmp.getTarget(sym),
       ]);
-      if (quote?.price && target?.targetConsensus) {
+      const minTarget = target?.targetLow ?? target?.targetConsensus;
+      if (quote?.price && minTarget) {
         const data = {
-          upside: ((target.targetConsensus - quote.price) / quote.price * 100),
+          // Conservative upside: min analyst target (targetLow, falling back to
+          // targetConsensus) with an additional 25% haircut — keep in sync with
+          // calcConservativeUpside() in dashboard.html.
+          upside: ((minTarget * 0.75 - quote.price) / quote.price * 100),
           price: quote.price,
           target: target.targetConsensus,
           cachedAt: new Date().toISOString(),
