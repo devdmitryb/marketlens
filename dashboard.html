@@ -1517,8 +1517,8 @@
         <button class="filter-btn"            id="f-new"      onclick="setFilter('new')">🟢 New Since Last Visit</button>
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--text-dim);white-space:nowrap">
-          Min upside
+        <label style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--text-dim);white-space:nowrap" title="Conservative: min analyst target −25%">
+          Min upside (cons.)
           <input type="range" id="upsideThreshold" min="0" max="100" value="20" step="5"
             oninput="updateThresholdLabel(this.value); applyUpsideFilter()"
             style="width:90px;accent-color:var(--accent);cursor:pointer" />
@@ -1535,7 +1535,7 @@
       <div>Analyst</div>
       <div>Grade Change</div>
       <div>Action</div>
-      <div>Upside</div>
+      <div title="Conservative: min analyst target −25%">Upside (cons.)</div>
       <div></div>
     </div>
     <div class="screener-list" id="screenerList">
@@ -2486,6 +2486,17 @@
   //  SIGNAL ENGINE — IX HUNTING STRATEGY
   // ══════════════════════════════════════════
 
+  // Conservative upside: (minimum analyst target × 0.75 - price) / price
+  // Uses targetLow (most conservative analyst target) with an additional 25% haircut,
+  // falling back to targetConsensus if targetLow isn't available. Returns a fraction
+  // (multiply by 100 for %), or null if there's no usable target/price.
+  function calcConservativeUpside(target, price) {
+    if (!target || !price) return null;
+    const minTarget = target.targetLow ?? target.targetConsensus;
+    if (!minTarget) return null;
+    return (minTarget * 0.75 - price) / price;
+  }
+
   function calcMomentum(history) {
     if (!history || history.length < 10) return null;
 
@@ -2564,9 +2575,7 @@
     const buyRatio  = tally.buy  / total;
     const sellRatio = tally.sell / total;
 
-    const upside = target.targetConsensus
-      ? (target.targetConsensus - quote.price) / quote.price
-      : 0;
+    const upside = calcConservativeUpside(target, quote.price) ?? 0;
 
     // For ix-hunting: only care about stocks with 20%+ upside potential
     const upsidePct      = upside * 100;
@@ -2743,9 +2752,8 @@
     const changeSign  = change >= 0 ? '+' : '';
 
     const consensus = target?.targetConsensus?.toFixed(2) ?? '—';
-    const upside = (quote && target?.targetConsensus)
-      ? ((target.targetConsensus - quote.price) / quote.price * 100).toFixed(1)
-      : null;
+    const upsideRaw = quote ? calcConservativeUpside(target, quote.price) : null;
+    const upside = upsideRaw !== null ? (upsideRaw * 100).toFixed(1) : null;
     const upsideClass = upside > 0 ? 'up' : 'down';
     const total = tally.buy + tally.hold + tally.sell;
 
@@ -2773,7 +2781,7 @@
       </div>
       <div class="target-col">
         <div class="target">$${consensus}</div>
-        ${upside !== null ? `<div class="upside ${upsideClass}">${upside > 0 ? '+' : ''}${upside}% upside</div>` : ''}
+        ${upside !== null ? `<div class="upside ${upsideClass}" title="Conservative: min analyst target −25%">${upside > 0 ? '+' : ''}${upside}% cons. upside</div>` : ''}
       </div>
       <div class="grades-col">
         ${total > 0 ? `
@@ -2902,11 +2910,8 @@
             fetch(`${SERVER_URL}/api/quote/${sym}`,  { headers }).then(r => r.json()),
             fetch(`${SERVER_URL}/api/target/${sym}`, { headers }).then(r => r.json()),
           ]);
-          if (quote?.price && target?.targetConsensus) {
-            screenerUpside[sym] = ((target.targetConsensus - quote.price) / quote.price * 100);
-          } else {
-            screenerUpside[sym] = null;
-          }
+          const upsideFrac = quote?.price ? calcConservativeUpside(target, quote.price) : null;
+          screenerUpside[sym] = upsideFrac !== null ? upsideFrac * 100 : null;
         } catch { screenerUpside[sym] = null; }
       }));
       renderScreener();
@@ -3408,12 +3413,13 @@
       const volSignalHtml = computeVolSignalHTML(chartCache[`${sym}_30`] || chartCache[`${sym}_90`] || chartCache[`${sym}_180`]);
       const combinedSignalHtml = renderCombinedSignalHTML(signal, lastVolSignalType);
 
-      // upside calc
+      // upside calc — conservative: (min analyst target × 0.75 - price) / price
       const price = quote?.price ?? 0;
       const consensus = target?.targetConsensus ?? null;
-      const upsidePct = consensus ? ((consensus - price) / price * 100) : null;
+      const upsideFrac = price ? calcConservativeUpside(target, price) : null;
+      const upsidePct = upsideFrac !== null ? upsideFrac * 100 : null;
       const upsideColor = upsidePct > 0 ? 'var(--accent2)' : 'var(--danger)';
-      const barPct = consensus ? Math.min(Math.abs(upsidePct), 50) * 2 : 0;
+      const barPct = upsidePct !== null ? Math.min(Math.abs(upsidePct), 50) * 2 : 0;
 
       const signalKey = signal.toLowerCase().replace(/[^a-z]/g, '-').replace(/-+/g, '-');
       const signalClass = {
@@ -3578,11 +3584,12 @@
             <span class="stat-value" style="color:${upsideColor}">${consensus ? '$'+consensus.toFixed(2) : '—'}</span>
           </div>
           <div class="stat-row">
-            <span class="stat-label">Upside</span>
+            <span class="stat-label" title="Conservative: min analyst target −25%">Conservative Upside</span>
             <span class="stat-value" style="color:${upsideColor};font-size:1.05rem;font-weight:600">
               ${upsidePct !== null ? (upsidePct > 0 ? '+' : '') + upsidePct.toFixed(1) + '%' : '—'}
             </span>
           </div>
+          <div style="font-size:0.65rem;color:var(--muted);margin-top:-6px;margin-bottom:6px">~min target −25%</div>
           ${upsidePct !== null ? `
           <div class="upside-bar-wrap">
             <div class="upside-bar-bg">
@@ -3657,7 +3664,7 @@
       const inWatch  = watchlist.includes(sym);
       // Build pre-filled note from signal + upside
       const upsideStr = (upsidePct !== null && consensus)
-        ? ` | Upside: ${upsidePct > 0 ? '+' : ''}${upsidePct.toFixed(1)}% (target $${consensus.toFixed(2)})`
+        ? ` | Conservative Upside: ${upsidePct > 0 ? '+' : ''}${upsidePct.toFixed(1)}% (consensus target $${consensus.toFixed(2)})`
         : '';
       const autoNote = `${signal} — ${reason}${upsideStr}`;
 
@@ -5307,10 +5314,11 @@
         const analystsBearish = (tally.sell / (tally.buy + tally.hold + tally.sell || 1)) >= 0.4;
 
         // 4. In position + upside dropped below 20% after big run = exit (WAIT signal means near target)
+        const backtestUpside = calcConservativeUpside(mockTarget, price);
         const nearTargetExit = signal === 'WAIT' &&
           momentum?.hadBigRun &&
-          mockTarget?.targetConsensus &&
-          ((mockTarget.targetConsensus - price) / price * 100) < 20;
+          backtestUpside !== null &&
+          (backtestUpside * 100) < 20;
 
         const isLastDay = i === history.length - 1;
 
