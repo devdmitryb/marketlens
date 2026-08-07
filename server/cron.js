@@ -426,6 +426,97 @@ Open MarketLens: https://marketlens-bt5u.onrender.com
   }
 }
 
+// ── JOB 5: Weekly status email ────────────────────────────────────
+// Every Sunday 8am ET — per-user activity summary, sent to GMAIL_USER (ops inbox),
+// not to each user's own email
+async function sendWeeklyStatusEmail() {
+  console.log('[cron] Sending weekly status email…');
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  if (!gmailUser || !gmailPass) {
+    console.log('[cron] Weekly status email skipped — GMAIL_USER/GMAIL_APP_PASSWORD not set');
+    return;
+  }
+
+  let users;
+  try {
+    users = await db.getUsers();
+  } catch(e) {
+    console.error('[cron] Weekly status email: getUsers failed:', e.message);
+    return;
+  }
+
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  const sections = [];
+  for (const user of users) {
+    try {
+      const [watchlist, portfolio, practice] = await Promise.all([
+        db.getWatchlist(user.id),
+        db.getPortfolio(user.id),
+        db.getPractice(user.id),
+      ]);
+
+      const portfolioOpenCount = (portfolio.open || []).length;
+      const practiceOpenCount  = practice.reduce((n, acct) => n + (acct.open || []).length, 0);
+
+      const symbols = [...new Set([
+        ...watchlist,
+        ...(portfolio.open || []).map(p => p.sym),
+        ...practice.flatMap(acct => (acct.open || []).map(p => p.sym)),
+      ])];
+
+      let signalChangeCount = 0;
+      if (symbols.length) {
+        const { rows } = await db.pool.query(
+          'SELECT COUNT(*) FROM signal_log WHERE symbol = ANY($1) AND created_at >= $2',
+          [symbols, sevenDaysAgo]
+        );
+        signalChangeCount = parseInt(rows[0].count, 10);
+      }
+
+      const lastActive = user.last_active
+        ? new Date(user.last_active).toLocaleString('en-US', { timeZone: 'America/New_York' })
+        : 'Never';
+
+      sections.push(
+`${user.display_name || user.username} (@${user.username})
+  Watchlist symbols:        ${watchlist.length}
+  Open portfolio positions: ${portfolioOpenCount}
+  Open practice positions:  ${practiceOpenCount}
+  Signal changes (7d):      ${signalChangeCount}
+  Last active:              ${lastActive}`
+      );
+    } catch(e) {
+      console.error(`[cron] Weekly status email: failed to summarize user ${user.username}:`, e.message);
+    }
+  }
+
+  const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  const subject = `📊 MarketLens Weekly Report - ${dateStr}`;
+  const body = `MarketLens Weekly Status Report — ${dateStr}
+
+${sections.join('\n\n')}`;
+
+  try {
+    const nodemailer  = require('nodemailer');
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: gmailUser, pass: gmailPass },
+    });
+    await transporter.sendMail({
+      from: `"MarketLens" <${gmailUser}>`,
+      to: gmailUser,
+      subject,
+      text: body,
+    });
+    console.log('[cron] Weekly status email sent');
+  } catch(e) {
+    console.error('[cron] Weekly status email failed:', e.message);
+  }
+}
+
 function isCriticalSignal(signal) {
   return signal === 'SELL — REVERSAL' || signal === 'TRIM' || signal === 'SELL';
 }
@@ -479,6 +570,11 @@ function startCronJobs() {
   // Benchmark symbols — every 6 hours, every day (not tied to market schedule)
   cron.schedule('0 */6 * * *', async () => {
     await refreshBenchmarkSymbols();
+  }, { timezone: 'America/New_York' });
+
+  // Weekly status email — every Sunday at 8am ET
+  cron.schedule('0 8 * * 0', async () => {
+    await sendWeeklyStatusEmail();
   }, { timezone: 'America/New_York' });
 
   console.log('[cron] Jobs scheduled ✅');
