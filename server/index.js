@@ -180,6 +180,32 @@ app.post('/api/admin/users/:id/reset-password', auth, requireAdmin, async (req, 
   }
 });
 
+app.post('/api/admin/test-email', auth, requireAdmin, async (req, res) => {
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  if (!gmailUser || !gmailPass) {
+    return res.status(400).json({ error: 'GMAIL_USER/GMAIL_APP_PASSWORD not configured' });
+  }
+
+  try {
+    const nodemailer  = require('nodemailer');
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: gmailUser, pass: gmailPass },
+    });
+    const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+    await transporter.sendMail({
+      from: `"MarketLens" <${gmailUser}>`,
+      to: gmailUser,
+      subject: `✅ MarketLens test email - ${timestamp}`,
+      text: 'This is a test email from MarketLens. Server is running correctly.',
+    });
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Screener feed (cached, no FMP call)
 app.get('/api/screener', auth, async (req, res) => {
   try {
