@@ -1028,8 +1028,12 @@
         transform: translateY(100%) !important;
         top: auto !important; bottom: 0 !important; height: 90vh;
         border-left: none !important;
-        border-top: 1px solid var(--border);
-        border-radius: 16px 16px 0 0;
+        border-right: none !important;
+        border-bottom: none !important;
+        border-top: 1px solid var(--border) !important;
+        border-radius: 16px 16px 0 0 !important;
+        opacity: 1 !important;
+        visibility: visible !important;
       }
       .drawer.open { transform: translateY(0) !important; }
 
@@ -1211,18 +1215,22 @@
 
     .drawer {
       position: fixed;
-      top: 0; right: 0; bottom: 0;
-      width: 380px;
+      top: 40px; bottom: 40px;
+      left: 50%;
+      width: clamp(600px, 50vw, 780px);
       background: var(--surface);
-      border-left: 1px solid var(--border);
+      border: 1px solid var(--border);
+      border-radius: 16px;
       z-index: 101;
-      transform: translateX(100%);
-      transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+      transform: translateX(-50%);
+      opacity: 0;
+      visibility: hidden;
+      transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.25s ease, visibility 0.25s ease;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
     }
-    .drawer.open { transform: translateX(0); }
+    .drawer.open { transform: translateX(-50%); opacity: 1; visibility: visible; }
 
     .drawer-header {
       padding: 24px 24px 16px;
@@ -1341,10 +1349,6 @@
       gap: 8px;
     }
     .drawer-actions .btn { flex: 1; text-align: center; }
-
-    @media (max-width: 768px) {
-      .drawer { width: 100vw; }
-    }
 
     .toast {
       position: fixed;
