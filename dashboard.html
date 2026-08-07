@@ -1824,6 +1824,11 @@
       <button class="btn" onclick="createAdminUser()">+ Create User</button>
     </div>
 
+    <div class="section-title">Email</div>
+    <div class="watchlist-bar" style="flex-wrap:wrap">
+      <button class="btn secondary" onclick="sendTestEmail()">📧 Send Test Email</button>
+    </div>
+
     <div class="section-title">Users</div>
     <div class="pos-header" style="grid-template-columns:120px 140px 1fr 80px 150px 150px">
       <div>Username</div><div>Display Name</div><div>Email</div><div>Role</div><div>Last Active</div><div>Actions</div>
@@ -2254,6 +2259,18 @@
       if (!res.ok) { alert(data.error || 'Failed to delete user'); return; }
       loadAdminUsers();
     } catch(e) { alert('Failed to delete user: ' + e.message); }
+  }
+
+  async function sendTestEmail() {
+    try {
+      const res = await fetch(`${SERVER_URL}/api/admin/test-email`, {
+        method: 'POST',
+        headers: { 'x-app-token': APP_TOKEN },
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) { toast(data.error || 'Failed to send test email', 'error'); return; }
+      toast('Test email sent ✅', 'success');
+    } catch(e) { toast('Failed to send test email: ' + e.message, 'error'); }
   }
 
   function escapeHtml(str) {
