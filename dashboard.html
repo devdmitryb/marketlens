@@ -3018,9 +3018,7 @@
           <div class="screener-date">${date}</div>
         </div>
         <div class="news-title">
-          ${item.newsURL
-            ? `<a href="${item.newsURL}" target="_blank" rel="noopener">${item.newsTitle ?? item.symbol}</a>`
-            : (item.newsTitle ?? '—')}
+          ${item.newsTitle ?? '—'}
         </div>
         <div style="font-size:0.78rem;color:var(--text-dim)">${item.gradingCompany ?? '—'}</div>
         <div class="grade-change">${gradeChange}</div>
@@ -3046,7 +3044,7 @@
       `;
       row.style.cursor = 'pointer';
       row.onclick = (e) => {
-        if (e.target.classList.contains('add-watch-btn') || e.target.classList.contains('skip-btn') || e.target.tagName === 'A') return;
+        if (e.target.classList.contains('add-watch-btn') || e.target.classList.contains('skip-btn')) return;
         openDrawer(item.symbol);
       };
       list.appendChild(row);
