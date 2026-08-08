@@ -58,4 +58,10 @@ async function getRatingsSnapshot(sym) {
   return Array.isArray(data) ? data[0] : null;
 }
 
-module.exports = { getQuote, getGrades, getTarget, getHistory, getGradesLatestNews, getEarnings, getRatingsSnapshot };
+// Symbol/name search for the header autocomplete
+async function search(query, limit = 8) {
+  const data = await fmpFetch(`/search?query=${encodeURIComponent(query)}&limit=${limit}`);
+  return Array.isArray(data) ? data : [];
+}
+
+module.exports = { getQuote, getGrades, getTarget, getHistory, getGradesLatestNews, getEarnings, getRatingsSnapshot, search };
