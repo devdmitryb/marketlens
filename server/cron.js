@@ -359,10 +359,12 @@ async function enrichScreenerUpside() {
       if (age < 24 * 60 * 60 * 1000) { enrichedCount++; continue; } // skip if fresh
     }
     try {
-      const [quote, target] = await Promise.all([
-        fmp.getQuote(sym),
-        fmp.getTarget(sym),
-      ]);
+      // Sequential with 400ms between each FMP call (was Promise.all + sleep(200),
+      // ~10 calls/sec) — this keeps enrichment to ~2.5 calls/sec, well under FMP limits.
+      const quote = await fmp.getQuote(sym);
+      await sleep(400);
+      const target = await fmp.getTarget(sym);
+      await sleep(400);
       const minTarget = target?.targetLow ?? target?.targetConsensus;
       if (quote?.price && minTarget) {
         const data = {
@@ -384,7 +386,7 @@ async function enrichScreenerUpside() {
         }
         enrichedCount++;
       }
-      await sleep(200);
+      // (delays already applied between the getQuote/getTarget calls above)
     } catch {}
   }
   console.log(`[cron] Enriched ${enrichedCount} symbols`);
@@ -630,11 +632,15 @@ function startCronJobs() {
 
   // Run immediately on startup — benchmarks first so /api/overview has data
   // cached post-deploy, then seed the per-symbol refresh queue (the minute
-  // job drains it from there).
+  // job drains it from there). Stagger the jobs with 5s gaps so they don't all
+  // hammer FMP simultaneously on deploy.
   setTimeout(async () => {
     await collectScreenerFeed();
+    await sleep(5000);
     await enrichScreenerUpside();
+    await sleep(5000);
     await refreshBenchmarkSymbols();
+    await sleep(5000);
     await buildRefreshQueue();
   }, 3000);
 }

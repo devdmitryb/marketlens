@@ -1,14 +1,16 @@
 // FMP API client — all FMP calls go through here
 const BASE = 'https://financialmodelingprep.com/stable';
 
-async function fmpFetch(path, retries = 2) {
+async function fmpFetch(path, retries = 1) {
   const key = process.env.FMP_API_KEY;
   if (!key) throw new Error('FMP_API_KEY not set');
   const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}apikey=${key}`;
   const res  = await fetch(url);
   if (res.status === 429 && retries > 0) {
-    console.warn(`[fmp] Rate limited, retrying in 2s... (${retries} left)`);
-    await new Promise(r => setTimeout(r, 2000));
+    // Longer backoff + a single retry so a rate-limited burst backs off instead of
+    // amplifying itself (was 2 retries at 2s, which piled more calls onto the flood)
+    console.warn(`[fmp] Rate limited, retrying in 5s... (${retries} left)`);
+    await new Promise(r => setTimeout(r, 5000));
     return fmpFetch(path, retries - 1);
   }
   if (!res.ok) throw new Error(`FMP error: ${res.status} ${url}`);

@@ -230,6 +230,8 @@ app.get('/api/screener', auth, async (req, res) => {
 // while the user types. Bounded to keep memory in check.
 const searchCache = {}; // { [q]: { results, ts } }
 const SEARCH_TTL  = 5 * 60 * 1000;
+let lastSearchAt  = 0;  // global cooldown timestamp — throttles FMP search calls
+const SEARCH_COOLDOWN = 500; // ms
 app.get('/api/search', auth, async (req, res) => {
   const q = (req.query.q || '').trim();
   if (q.length < 2) return res.json([]);
@@ -239,6 +241,13 @@ app.get('/api/search', auth, async (req, res) => {
   if (cached && Date.now() - cached.ts < SEARCH_TTL) {
     return res.json(cached.results);
   }
+
+  // Cooldown: if a search hit FMP <500ms ago, don't fire another — serve whatever
+  // we have cached for this query (even if stale) or []. Prevents keystroke floods.
+  if (Date.now() - lastSearchAt < SEARCH_COOLDOWN) {
+    return res.json(cached ? cached.results : []);
+  }
+  lastSearchAt = Date.now();
 
   try {
     const raw = await fmp.search(q, 8);
