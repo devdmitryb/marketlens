@@ -1,14 +1,16 @@
 // FMP API client — all FMP calls go through here
 const BASE = 'https://financialmodelingprep.com/stable';
 
-async function fmpFetch(path, retries = 2) {
+async function fmpFetch(path, retries = 1) {
   const key = process.env.FMP_API_KEY;
   if (!key) throw new Error('FMP_API_KEY not set');
   const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}apikey=${key}`;
   const res  = await fetch(url);
   if (res.status === 429 && retries > 0) {
-    console.warn(`[fmp] Rate limited, retrying in 2s... (${retries} left)`);
-    await new Promise(r => setTimeout(r, 2000));
+    // Longer backoff + a single retry so a rate-limited burst backs off instead of
+    // amplifying itself (was 2 retries at 2s, which piled more calls onto the flood)
+    console.warn(`[fmp] Rate limited, retrying in 5s... (${retries} left)`);
+    await new Promise(r => setTimeout(r, 5000));
     return fmpFetch(path, retries - 1);
   }
   if (!res.ok) throw new Error(`FMP error: ${res.status} ${url}`);
@@ -58,10 +60,35 @@ async function getRatingsSnapshot(sym) {
   return Array.isArray(data) ? data[0] : null;
 }
 
-// Symbol/name search for the header autocomplete
+// Symbol/name search for the header autocomplete.
+// NOTE: /stable/search 404s on our FMP plan. Use the dedicated symbol-prefix and
+// company-name endpoints instead, and merge them so typing a ticker ("TSL") or a
+// company name ("tesla") both return results. Symbol matches are listed first.
+// Tolerant of either endpoint being unavailable (Promise.allSettled).
 async function search(query, limit = 8) {
-  const data = await fmpFetch(`/search?query=${encodeURIComponent(query)}&limit=${limit}`);
-  return Array.isArray(data) ? data : [];
+  const q = encodeURIComponent(query);
+  const [bySymbol, byName] = await Promise.allSettled([
+    fmpFetch(`/search-symbol?query=${q}&limit=${limit}`),
+    fmpFetch(`/search-name?query=${q}&limit=${limit}`),
+  ]);
+
+  if (bySymbol.status === 'rejected' && byName.status === 'rejected') {
+    console.warn(`[fmp] search failed on both endpoints for "${query}":`, bySymbol.reason?.message);
+    return [];
+  }
+
+  const merged = [];
+  const seen   = new Set();
+  for (const settled of [bySymbol, byName]) {
+    if (settled.status !== 'fulfilled' || !Array.isArray(settled.value)) continue;
+    for (const r of settled.value) {
+      if (!r || !r.symbol || seen.has(r.symbol)) continue;
+      seen.add(r.symbol);
+      merged.push(r);
+      if (merged.length >= limit) return merged;
+    }
+  }
+  return merged;
 }
 
 module.exports = { getQuote, getGrades, getTarget, getHistory, getGradesLatestNews, getEarnings, getRatingsSnapshot, search };
