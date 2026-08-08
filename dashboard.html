@@ -671,6 +671,42 @@
     .form-group select option { background: var(--surface); }
     .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
     .modal-actions .btn { flex: 1; text-align: center; }
+    .modal-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* Split modal layout (buy/sell with symbol-info panel) */
+    .modal.modal-wide { width: 80vw; max-width: 900px; }
+    .modal-split { display: grid; grid-template-columns: 260px 1fr; gap: 22px; align-items: start; }
+    .modal-form-panel { min-width: 0; }
+    .modal-info-panel {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 16px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .modal-info-panel .mi-sym   { font-family: var(--mono); font-size: 1.4rem; font-weight: 700; line-height: 1; }
+    .modal-info-panel .mi-price { font-family: var(--mono); font-size: 1.05rem; color: var(--accent2); }
+    .modal-info-panel .mi-list  { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
+    .modal-info-panel .mi-row   { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .modal-info-panel .mi-row > span:first-child {
+      color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;
+      font-size: 0.62rem; font-weight: 700;
+    }
+    .modal-info-panel .mi-row > span:last-child { font-family: var(--mono); font-size: 0.78rem; text-align: right; }
+    .note-hint { font-size: 0.68rem; color: var(--muted); margin-top: 5px; }
+    .note-hint.err { color: var(--danger); }
+
+    /* Inline-editable note cells (portfolio + practice open positions) */
+    .editable-note { cursor: text; }
+    .editable-note .note-edit-pencil { opacity: 0.4; font-size: 0.68rem; margin-left: 4px; }
+    .editable-note:hover .note-edit-pencil { opacity: 1; }
+    .note-edit-ta {
+      width: 100%; min-height: 54px; background: var(--bg); color: var(--text);
+      border: 1px solid var(--accent); border-radius: 6px; padding: 6px 8px;
+      font-family: var(--sans); font-size: 0.75rem; resize: vertical; outline: none;
+      white-space: normal;
+    }
+    @media (max-width: 720px) {
+      .modal.modal-wide { width: 95vw; }
+      .modal-split { grid-template-columns: 1fr; gap: 16px; }
+    }
 
     @media (max-width: 900px) {
       .portfolio-summary { grid-template-columns: 1fr 1fr; }
@@ -1870,90 +1906,113 @@
 
 <!-- ═══ PRACTICE BUY MODAL ═══ -->
 <div class="modal-overlay" id="practiceBuyModal">
-  <div class="modal">
+  <div class="modal modal-wide">
     <h3>🎮 <span id="pb-title">Practice Buy</span></h3>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Symbol</label>
-        <input type="text" id="pb-symbol" readonly
-          style="opacity:0.7;cursor:default;text-transform:uppercase" />
+    <div class="modal-split">
+      <!-- Left: symbol info -->
+      <div class="modal-info-panel" id="pb-info">
+        <span style="color:var(--muted);font-size:0.78rem">No stock data.</span>
       </div>
-      <div class="form-group">
-        <label>Shares</label>
-        <input type="number" id="pb-shares" placeholder="e.g. 10" min="1" step="1"
-          oninput="updatePracticeCostPreview()" />
+      <!-- Right: buy form -->
+      <div class="modal-form-panel">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Symbol</label>
+            <input type="text" id="pb-symbol" readonly
+              style="opacity:0.7;cursor:default;text-transform:uppercase" />
+          </div>
+          <div class="form-group">
+            <label>Shares</label>
+            <input type="number" id="pb-shares" placeholder="e.g. 10" min="1" step="1"
+              oninput="updatePracticeCostPreview()" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Live Price (read-only)</label>
+            <input type="number" id="pb-price" readonly
+              style="opacity:0.7;cursor:default;color:var(--accent2)" />
+          </div>
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" id="pb-date" />
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>Practice Account</label>
+          <select id="pb-account"
+            style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--sans);font-size:0.88rem;padding:9px 12px;border-radius:7px;outline:none;width:100%"
+            onchange="updatePracticeCostPreview()">
+          </select>
+        </div>
+        <!-- Cost summary -->
+        <div id="pb-cost-preview" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:12px;font-family:var(--mono);font-size:0.82rem;display:block">
+          <span style="color:var(--muted)">Enter shares to see cost breakdown</span>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Why are you buying? <span style="color:var(--danger)">*</span></label>
+          <textarea id="pb-note" rows="3" oninput="validatePracticeBuy()"
+            style="resize:vertical;min-height:70px;font-family:var(--sans);font-size:0.82rem"
+            placeholder="e.g. 20%+ analyst upside confirmed by a volume breakout"></textarea>
+          <div class="note-hint err" id="pb-note-hint">Required: describe your reason for buying</div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn secondary" onclick="document.getElementById('practiceBuyModal').classList.remove('open')">Cancel</button>
+          <button class="btn" id="pb-confirm" onclick="executePracticeBuy()">🎮 Buy</button>
+        </div>
       </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Live Price (read-only)</label>
-        <input type="number" id="pb-price" readonly
-          style="opacity:0.7;cursor:default;color:var(--accent2)" />
-      </div>
-      <div class="form-group">
-        <label>Date</label>
-        <input type="date" id="pb-date" />
-      </div>
-    </div>
-    <div class="form-group" style="margin-bottom:12px">
-      <label>Practice Account</label>
-      <select id="pb-account"
-        style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--sans);font-size:0.88rem;padding:9px 12px;border-radius:7px;outline:none;width:100%"
-        onchange="updatePracticeCostPreview()">
-      </select>
-    </div>
-    <!-- Cost summary -->
-    <div id="pb-cost-preview" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:12px;font-family:var(--mono);font-size:0.82rem;display:block">
-      <span style="color:var(--muted)">Enter shares to see cost breakdown</span>
-    </div>
-    <div class="form-group" style="margin-bottom:0">
-      <label>Why are you buying? <span style="color:var(--danger)">*</span></label>
-      <textarea id="pb-note" rows="3"
-        style="resize:vertical;min-height:70px;font-family:var(--sans);font-size:0.82rem"
-        placeholder="Pre-filled from signal — edit or add your own thoughts"></textarea>
-    </div>
-    <div class="modal-actions">
-      <button class="btn secondary" onclick="document.getElementById('practiceBuyModal').classList.remove('open')">Cancel</button>
-      <button class="btn" id="pb-confirm" onclick="executePracticeBuy()">🎮 Buy</button>
     </div>
   </div>
 </div>
 
 <!-- ═══ PRACTICE SELL MODAL ═══ -->
 <div class="modal-overlay" id="practiceSellModal">
-  <div class="modal">
+  <div class="modal modal-wide">
     <h3>🎮 Sell <span id="ps-title">Position</span></h3>
     <input type="hidden" id="ps-id" />
-    <div class="form-row">
-      <div class="form-group">
-        <label>Shares to sell</label>
-        <input type="number" id="ps-shares" min="1" step="1" />
+    <div class="modal-split">
+      <!-- Left: symbol info + live P&L preview (populated by openPracticeSell) -->
+      <div class="modal-info-panel" id="ps-info"></div>
+      <!-- Right: sell form -->
+      <div class="modal-form-panel">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Shares to sell</label>
+            <input type="number" id="ps-shares" min="1" step="1" />
+          </div>
+          <div class="form-group">
+            <label>Exit Price (blank = live)</label>
+            <input type="number" id="ps-price" placeholder="auto" min="0" step="any" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Exit Date</label>
+            <input type="date" id="ps-date" />
+          </div>
+          <div class="form-group">
+            <label>Reason</label>
+            <select id="ps-reason">
+              <option value="signal">Signal triggered</option>
+              <option value="target">Hit target</option>
+              <option value="trim">Partial trim</option>
+              <option value="stoploss">Stop-loss</option>
+              <option value="manual">Manual</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Why are you selling? <span style="color:var(--danger)">*</span></label>
+          <textarea id="ps-note" rows="3" oninput="validatePracticeSell()"
+            style="resize:vertical;min-height:70px;font-family:var(--sans);font-size:0.82rem"
+            placeholder="e.g. Hit target / signal turned SELL / taking profits"></textarea>
+          <div class="note-hint err" id="ps-note-hint">Required: describe your reason for selling</div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn secondary" onclick="document.getElementById('practiceSellModal').classList.remove('open')">Cancel</button>
+          <button class="btn" id="ps-confirm" onclick="executePracticeSell()">Sell</button>
+        </div>
       </div>
-      <div class="form-group">
-        <label>Exit Price (blank = live)</label>
-        <input type="number" id="ps-price" placeholder="auto" min="0" step="any" />
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Exit Date</label>
-        <input type="date" id="ps-date" />
-      </div>
-      <div class="form-group">
-        <label>Reason</label>
-        <select id="ps-reason">
-          <option value="signal">Signal triggered</option>
-          <option value="target">Hit target</option>
-          <option value="trim">Partial trim</option>
-          <option value="stoploss">Stop-loss</option>
-          <option value="manual">Manual</option>
-        </select>
-      </div>
-    </div>
-    <div id="ps-pnl-preview" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;font-family:var(--mono);font-size:0.8rem;margin-bottom:16px;display:none"></div>
-    <div class="modal-actions">
-      <button class="btn secondary" onclick="document.getElementById('practiceSellModal').classList.remove('open')">Cancel</button>
-      <button class="btn" onclick="executePracticeSell()">Sell</button>
     </div>
   </div>
 </div>
@@ -3495,6 +3554,8 @@
       const histData = cacheGet(`hist60_${sym}`, 'quote');
       const momentum = calcMomentum(histData);
       const data = { quote, target, tally, grades, momentum };
+      // Cache for reuse elsewhere (e.g. the buy/sell modal info panels read stockData[sym])
+      stockData[sym] = data;
       const { signal, reason } = calcSignal(data);
       currentDrawerSignal = signal;
 
@@ -4120,10 +4181,10 @@
               ? `${pnlDollar >= 0 ? '+' : ''}$${pnlDollar.toFixed(2)}<br/><span style="font-size:0.72rem;opacity:0.8">${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%</span>`
               : '<span style="color:var(--muted);font-size:0.75rem">loading…</span>'}
           </div>
-          <div class="pos-note">
-            ${pos.catalyst ? `<span style="color:var(--accent);font-size:0.7rem">⚡ ${pos.catalyst}</span><br/>` : ''}
+          <div class="pos-note editable-note" title="Click to edit note" onclick="startNoteEdit(event,'portfolio',${pos.id})">
+            ${pos.catalyst ? `<span style="color:var(--accent);font-size:0.7rem">⚡ ${escapeHtml(pos.catalyst)}</span><br/>` : ''}
             ${pos.myTarget ? `<span style="color:var(--accent2);font-size:0.7rem">🎯 exit $${pos.myTarget}</span><br/>` : ''}
-            ${pos.note ? `<span style="font-size:0.72rem">${pos.note}</span>` : ''}
+            ${pos.note ? `<span style="font-size:0.72rem">${escapeHtml(pos.note)}</span>` : '<span style="color:var(--muted);font-size:0.72rem">Add note…</span>'}<span class="note-edit-pencil">✏️</span>
           </div>
           <div>${lots.length === 1 && signal !== '—' ? `<span class="signal ${signalClass}" style="font-size:0.7rem;padding:4px 8px">${signal}</span>` : (lots.length > 1 ? '' : '—')}</div>
           <div>${lots.length === 1 && earningsEl ? (() => {
@@ -4675,6 +4736,75 @@
       </div>`;
   }
 
+  // Signal name → CSS badge class, shared by the modal info panels
+  const SIGNAL_CLASS_MAP = {
+    'buy--confirmed':'signal-buy','buy--watch':'signal-buy-watch',
+    'buy--wait':'signal-buy-wait','buy--unconfirmed':'signal-buy-wait',
+    'trim':'signal-trim','sell':'signal-sell','sell--reversal':'signal-sell-reversal',
+    'hold':'signal-hold','wait':'signal-wait',
+  };
+  function signalBadgeClass(signal) {
+    const key = String(signal).toLowerCase().replace(/[^a-z]/g,'-').replace(/-+/g,'-');
+    return SIGNAL_CLASS_MAP[key] ?? 'signal-wait';
+  }
+  const VOL_SIGNAL_LABELS = {
+    confirmed: '✅ Confirmed move', pullback: '🟡 Normal pullback',
+    weak: '⚠️ Weak move', selling: '🔴 Selling pressure',
+  };
+
+  // Builds the left-hand symbol-info panel shared by the buy & sell modals.
+  // Reads stockData[sym] (populated by the watchlist/drawer flows) plus the
+  // live volume signal from the most recent drawer render (lastVolSignalType).
+  function buildStockInfoPanelHTML(sym, currentPrice, extraRowsHtml = '') {
+    const data = stockData[sym];
+    let priceHtml = currentPrice ? `$${Number(currentPrice).toFixed(2)}` : '—';
+    let signalHtml = `<span style="color:var(--muted);font-size:0.72rem">No signal data yet</span>`;
+    let upsideHtml = '—', consensusHtml = '—';
+    let tallyHtml  = `<span style="color:var(--muted)">—</span>`;
+    // lastVolSignalType is only meaningful for the symbol whose drawer produced it
+    let volHtml    = (currentDrawerSym === sym && VOL_SIGNAL_LABELS[lastVolSignalType]) || '—';
+
+    if (data) {
+      const { signal, reason } = calcSignal(data);
+      signalHtml = `<span class="signal ${signalBadgeClass(signal)}" style="align-self:flex-start;font-size:0.68rem;padding:4px 10px" title="${escapeHtml(reason || '')}">${signal}</span>`;
+      const price = data.quote?.price ?? (currentPrice ? Number(currentPrice) : null);
+      if (price) priceHtml = `$${price.toFixed(2)}`;
+      const upFrac = data.quote ? calcConservativeUpside(data.target, data.quote.price) : null;
+      if (upFrac !== null) {
+        const up = upFrac * 100;
+        upsideHtml = `<span class="${up >= 0 ? 'up' : 'down'}">${up >= 0 ? '+' : ''}${up.toFixed(1)}%</span>`;
+      }
+      const cons = data.target?.targetConsensus;
+      if (cons) consensusHtml = `$${cons.toFixed(2)}`;
+      const t = data.tally || { buy:0, hold:0, sell:0 };
+      if (t.buy + t.hold + t.sell > 0) {
+        tallyHtml = `<span class="up">${t.buy}</span> · <span style="color:var(--accent)">${t.hold}</span> · <span class="down">${t.sell}</span>`;
+      }
+    }
+
+    return `
+      <div class="mi-sym">${escapeHtml(sym)}</div>
+      <div class="mi-price">${priceHtml}</div>
+      ${signalHtml}
+      <div class="mi-list">
+        <div class="mi-row"><span>Cons. Upside</span><span>${upsideHtml}</span></div>
+        <div class="mi-row"><span>Analyst Target</span><span>${consensusHtml}</span></div>
+        <div class="mi-row"><span>Analysts (B·H·S)</span><span>${tallyHtml}</span></div>
+        <div class="mi-row"><span>Volume Signal</span><span>${volHtml}</span></div>
+      </div>
+      ${extraRowsHtml}`;
+  }
+
+  // Enable/disable the Buy button based on the required note
+  function validatePracticeBuy() {
+    const note = (document.getElementById('pb-note')?.value || '').trim();
+    const btn  = document.getElementById('pb-confirm');
+    const hint = document.getElementById('pb-note-hint');
+    const ok   = note.length > 0;
+    if (btn)  btn.disabled = !ok;
+    if (hint) hint.className = 'note-hint' + (ok ? '' : ' err');
+  }
+
   function openPracticeBuyFromDrawer(sym, currentPrice, autoNote) {
     // Populate account selector
     const sel = document.getElementById('pb-account');
@@ -4691,9 +4821,12 @@
     document.getElementById('pb-shares').value = '';
     document.getElementById('pb-price').value  = currentPrice ? currentPrice.toFixed(2) : '';
     document.getElementById('pb-date').value   = new Date().toISOString().slice(0,10);
-    document.getElementById('pb-note').value   = autoNote || '';
+    // Note starts empty — the user must write their own reason (no signal auto-fill)
+    document.getElementById('pb-note').value   = '';
+    document.getElementById('pb-info').innerHTML = buildStockInfoPanelHTML(sym, currentPrice);
     if (currentPrice) livePracticePrices[sym]  = currentPrice;
     updatePracticeCostPreview();
+    validatePracticeBuy();
     document.getElementById('practiceBuyModal').classList.add('open');
     setTimeout(() => document.getElementById('pb-shares').focus(), 100);
   }
@@ -4741,8 +4874,19 @@
       renderPractice();
       toast(`✅ Bought ${shares} shares of ${sym} at $${price.toFixed(2)}`, 'success');
     } finally {
-      buyBtn.disabled = false;
+      // Restore the correct disabled state from the note (not an unconditional enable)
+      validatePracticeBuy();
     }
+  }
+
+  // Enable/disable the Sell button based on the required note
+  function validatePracticeSell() {
+    const note = (document.getElementById('ps-note')?.value || '').trim();
+    const btn  = document.getElementById('ps-confirm');
+    const hint = document.getElementById('ps-note-hint');
+    const ok   = note.length > 0;
+    if (btn)  btn.disabled = !ok;
+    if (hint) hint.className = 'note-hint' + (ok ? '' : ' err');
   }
 
   // ── SELL ──
@@ -4756,17 +4900,31 @@
     document.getElementById('ps-shares').max   = pos.shares;
     document.getElementById('ps-price').value  = '';
     document.getElementById('ps-date').value   = new Date().toISOString().slice(0,10);
-    document.getElementById('ps-pnl-preview').style.display = 'none';
+    // Note starts empty — the user must justify the sell
+    document.getElementById('ps-note').value   = '';
+
+    // Left panel: symbol info + entry / days-held rows + a P&L preview placeholder
+    const cur   = livePracticePrices[pos.sym];
+    const days  = Math.round((Date.now() - new Date(pos.date)) / 86400000);
+    const extraRows = `
+      <div class="mi-list" style="border-top:1px solid var(--border);padding-top:9px;margin-top:2px">
+        <div class="mi-row"><span>Entry</span><span>$${pos.entryPrice.toFixed(2)}</span></div>
+        <div class="mi-row"><span>Shares</span><span>${pos.shares}</span></div>
+        <div class="mi-row"><span>Held</span><span>${days}d</span></div>
+      </div>
+      <div id="ps-pnl-preview" style="margin-top:6px;font-family:var(--mono);font-size:0.9rem;font-weight:600;display:none"></div>`;
+    document.getElementById('ps-info').innerHTML = buildStockInfoPanelHTML(pos.sym, cur, extraRows);
 
     // Live P&L preview
     const updatePreview = () => {
       const exitPrice = parseFloat(document.getElementById('ps-price').value) || livePracticePrices[pos.sym] || 0;
       const sellShares= parseFloat(document.getElementById('ps-shares').value) || 0;
-      if (!exitPrice || !sellShares) return;
+      const el    = document.getElementById('ps-pnl-preview');
+      if (!el) return;
+      if (!exitPrice || !sellShares) { el.style.display = 'none'; return; }
       const gross = (exitPrice - pos.entryPrice) * sellShares;
       const net   = gross - pos.entryComm * (sellShares / pos.shares) - acc.commission;
       const pct   = (net / (pos.entryPrice * sellShares)) * 100;
-      const el    = document.getElementById('ps-pnl-preview');
       el.style.display = 'block';
       el.style.color   = net >= 0 ? 'var(--accent2)' : 'var(--danger)';
       el.innerHTML = `P&L: ${net >= 0 ? '+' : ''}$${net.toFixed(2)} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
@@ -4774,6 +4932,7 @@
     document.getElementById('ps-price').addEventListener('input', updatePreview);
     document.getElementById('ps-shares').addEventListener('input', updatePreview);
     updatePreview();
+    validatePracticeSell();
     document.getElementById('practiceSellModal').classList.add('open');
   }
 
@@ -4787,7 +4946,10 @@
     const sellSh = parseFloat(document.getElementById('ps-shares').value);
     const date   = document.getElementById('ps-date').value;
     const reason = document.getElementById('ps-reason').value;
+    const note   = (document.getElementById('ps-note').value || '').trim();
     let exitPrice= parseFloat(document.getElementById('ps-price').value);
+
+    if (!note) { alert('Please add a note — why are you selling?'); document.getElementById('ps-note').focus(); return; }
 
     if (!exitPrice) {
       try {
@@ -4803,21 +4965,76 @@
     const days   = Math.round((new Date(date) - new Date(pos.date)) / 86400000);
 
     acc.cash += sellSh * exitPrice - acc.commission;
-    acc.trades.push({ ts: new Date().toISOString(), type:'SELL', sym: pos.sym, shares: sellSh, price: exitPrice, commission: acc.commission, pnl: net, reason });
+    acc.trades.push({ ts: new Date().toISOString(), type:'SELL', sym: pos.sym, shares: sellSh, price: exitPrice, commission: acc.commission, pnl: net, reason, note });
 
+    // sellNote keeps the sell rationale distinct from pos.note (the original buy reason)
     if (sellSh >= pos.shares) {
       // Full close
-      acc.closed.unshift({ ...pos, exitDate: date, exitPrice, exitComm: acc.commission, reason, days, netPnl: net, pnlPct: pct });
+      acc.closed.unshift({ ...pos, exitDate: date, exitPrice, exitComm: acc.commission, reason, sellNote: note, days, netPnl: net, pnlPct: pct });
       acc.open.splice(posIdx, 1);
     } else {
       // Partial sell
       acc.open[posIdx].shares -= sellSh;
-      acc.closed.unshift({ ...pos, shares: sellSh, exitDate: date, exitPrice, exitComm: acc.commission, reason, days, netPnl: net, pnlPct: pct });
+      acc.closed.unshift({ ...pos, shares: sellSh, exitDate: date, exitPrice, exitComm: acc.commission, reason, sellNote: note, days, netPnl: net, pnlPct: pct });
     }
 
     savePracticeAccounts();
     document.getElementById('practiceSellModal').classList.remove('open');
     renderPractice();
+  }
+
+  // ── INLINE NOTE EDITING (portfolio + practice open positions) ──
+  // kind: 'portfolio' saves via savePortfolio(); 'practice' via savePracticeAccounts()
+  function findEditablePosition(kind, id) {
+    if (kind === 'practice') {
+      const acc = getCurrentAccount();
+      return acc?.open.find(p => p.id == id) || null; // == : ids are numeric, tolerate string
+    }
+    return openPositions.find(p => p.id == id) || null;
+  }
+
+  function rerenderNoteHost(kind) {
+    if (kind === 'practice') renderPractice();
+    else renderOpenPositions();
+  }
+
+  function startNoteEdit(ev, kind, id) {
+    ev.stopPropagation(); // don't let the row's onclick open the drawer
+    const cell = ev.currentTarget;
+    if (cell.querySelector('textarea')) return; // already editing
+    const pos = findEditablePosition(kind, id);
+    if (!pos) return;
+
+    const ta = document.createElement('textarea');
+    ta.className = 'note-edit-ta';
+    ta.value = pos.note || '';
+    cell.innerHTML = '';
+    // Relax the cell's ellipsis/clip so the textarea shows fully (cell is
+    // recreated on the re-render that ends editing, so no cleanup needed)
+    cell.style.overflow = 'visible';
+    cell.style.whiteSpace = 'normal';
+    cell.appendChild(ta);
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+
+    let done = false;
+    const commit = () => {
+      if (done) return;
+      done = true;
+      const p = findEditablePosition(kind, id);
+      if (p) {
+        p.note = ta.value.trim();
+        if (kind === 'practice') savePracticeAccounts(); else savePortfolio();
+      }
+      rerenderNoteHost(kind);
+    };
+    ta.addEventListener('blur', commit);
+    ta.addEventListener('click', e => e.stopPropagation());
+    ta.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }          // save
+      else if (e.key === 'Escape') { done = true; rerenderNoteHost(kind); }              // cancel
+    });
   }
 
   // ── PRICES ──
@@ -4914,7 +5131,7 @@
           <div class="pos-price">$${pos.entryPrice.toFixed(2)}</div>
           <div class="pos-price">${cur ? '$'+cur.toFixed(2) : '—'}</div>
           <div>${pnlHtml}</div>
-          <div class="pos-note">${pos.note || '—'}</div>
+          <div class="pos-note editable-note" title="Click to edit note" onclick="startNoteEdit(event,'practice',${pos.id})">${pos.note ? escapeHtml(pos.note) : '<span style="color:var(--muted)">Add note…</span>'}<span class="note-edit-pencil">✏️</span></div>
           <div>${signal !== '—' ? `<span class="signal ${sigClass}" style="font-size:0.7rem;padding:4px 8px">${signal}</span>` : '—'}</div>
           <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
             <span class="pos-days">${days}d</span>
