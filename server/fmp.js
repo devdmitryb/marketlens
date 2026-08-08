@@ -60,10 +60,35 @@ async function getRatingsSnapshot(sym) {
   return Array.isArray(data) ? data[0] : null;
 }
 
-// Symbol/name search for the header autocomplete
+// Symbol/name search for the header autocomplete.
+// NOTE: /stable/search 404s on our FMP plan. Use the dedicated symbol-prefix and
+// company-name endpoints instead, and merge them so typing a ticker ("TSL") or a
+// company name ("tesla") both return results. Symbol matches are listed first.
+// Tolerant of either endpoint being unavailable (Promise.allSettled).
 async function search(query, limit = 8) {
-  const data = await fmpFetch(`/search?query=${encodeURIComponent(query)}&limit=${limit}`);
-  return Array.isArray(data) ? data : [];
+  const q = encodeURIComponent(query);
+  const [bySymbol, byName] = await Promise.allSettled([
+    fmpFetch(`/search-symbol?query=${q}&limit=${limit}`),
+    fmpFetch(`/search-name?query=${q}&limit=${limit}`),
+  ]);
+
+  if (bySymbol.status === 'rejected' && byName.status === 'rejected') {
+    console.warn(`[fmp] search failed on both endpoints for "${query}":`, bySymbol.reason?.message);
+    return [];
+  }
+
+  const merged = [];
+  const seen   = new Set();
+  for (const settled of [bySymbol, byName]) {
+    if (settled.status !== 'fulfilled' || !Array.isArray(settled.value)) continue;
+    for (const r of settled.value) {
+      if (!r || !r.symbol || seen.has(r.symbol)) continue;
+      seen.add(r.symbol);
+      merged.push(r);
+      if (merged.length >= limit) return merged;
+    }
+  }
+  return merged;
 }
 
 module.exports = { getQuote, getGrades, getTarget, getHistory, getGradesLatestNews, getEarnings, getRatingsSnapshot, search };

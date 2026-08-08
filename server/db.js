@@ -386,6 +386,9 @@ async function getCachedQuote(symbol) {
 }
 
 async function setCachedQuote(symbol, data) {
+  // Skip when there's nothing to store — JSON.stringify(undefined) is undefined,
+  // which pg sends as SQL NULL and violates the data NOT NULL constraint.
+  if (data == null) return;
   await pool.query(`
     INSERT INTO quotes_cache (symbol, data, updated_at) VALUES ($1, $2, NOW())
     ON CONFLICT (symbol) DO UPDATE SET data = $2, updated_at = NOW()
@@ -399,6 +402,8 @@ async function getCachedGrades(symbol) {
 }
 
 async function setCachedGrades(symbol, data) {
+  // Skip when there's nothing to store (see setCachedQuote) — avoids a NULL data insert.
+  if (data == null) return;
   await pool.query(`
     INSERT INTO grades_cache (symbol, data, updated_at) VALUES ($1, $2, NOW())
     ON CONFLICT (symbol) DO UPDATE SET data = $2, updated_at = NOW()
@@ -412,6 +417,8 @@ async function getCachedTarget(symbol) {
 }
 
 async function setCachedTarget(symbol, data) {
+  // Skip when there's nothing to store (see setCachedQuote) — avoids a NULL data insert.
+  if (data == null) return;
   await pool.query(`
     INSERT INTO target_cache (symbol, data, updated_at) VALUES ($1, $2, NOW())
     ON CONFLICT (symbol) DO UPDATE SET data = $2, updated_at = NOW()
@@ -460,6 +467,8 @@ async function getCachedEarnings(symbol) {
 }
 
 async function setCachedEarnings(symbol, data) {
+  // Skip when there's nothing to store (see setCachedQuote) — avoids a NULL data insert.
+  if (data == null) return;
   await pool.query(`
     INSERT INTO earnings_cache (symbol, data, updated_at) VALUES ($1, $2, NOW())
     ON CONFLICT (symbol) DO UPDATE SET data = $2, updated_at = NOW()
