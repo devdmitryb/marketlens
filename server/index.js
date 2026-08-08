@@ -7,7 +7,7 @@ const jwt     = require('jsonwebtoken');
 const store   = require('./store');
 const db      = require('./db');
 const fmp     = require('./fmp');
-const { startCronJobs } = require('./cron');
+const { startCronJobs, rebuildRefreshQueue } = require('./cron');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -488,6 +488,7 @@ app.post('/api/watchlist', auth, async (req, res) => {
     store.write('watchlist', symbols);
   }
   res.json({ ok: true, symbols });
+  rebuildRefreshQueue().catch(e => console.error('[cron] rebuildRefreshQueue failed:', e.message));
 });
 
 // Practice accounts — per-user, sync across devices
@@ -511,6 +512,7 @@ app.post('/api/practice', auth, async (req, res) => {
     store.write('practice', accounts);
   }
   res.json({ ok: true });
+  rebuildRefreshQueue().catch(e => console.error('[cron] rebuildRefreshQueue failed:', e.message));
 });
 
 // Portfolio — per-user, sync across devices
@@ -534,14 +536,17 @@ app.post('/api/portfolio', auth, async (req, res) => {
     store.write('portfolio', data);
   }
   res.json({ ok: true });
+  rebuildRefreshQueue().catch(e => console.error('[cron] rebuildRefreshQueue failed:', e.message));
 });
 
 // ── Trigger manual refresh ────────────────────────────────────────
 app.post('/api/refresh', auth, async (req, res) => {
-  const { collectScreenerFeed, refreshWatchedSymbols } = require('./cron');
+  const { collectScreenerFeed, rebuildRefreshQueue } = require('./cron');
   res.json({ ok: true, message: 'Refresh started' });
-  // Run async after response
-  collectScreenerFeed().then(() => refreshWatchedSymbols());
+  // Run async after response: refresh the screener feed and rebuild the rolling
+  // per-symbol queue so any newly-added symbols enter the rotation immediately.
+  // (Individual symbol refreshes are drained one-per-minute by the queue job.)
+  collectScreenerFeed().then(() => rebuildRefreshQueue());
 });
 
 // ── Helper ────────────────────────────────────────────────────────
