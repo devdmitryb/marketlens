@@ -3142,6 +3142,17 @@
       </div>`;
   }
 
+  // Parse a price_history DATE ("YYYY-MM-DD") as a LOCAL-midnight date. Passing
+  // the raw string to new Date() parses it as UTC midnight, which rolls back to
+  // the previous calendar day in negative-offset zones (EST/EDT = UTC-4/5) — so
+  // e.g. "2026-08-07" would display and compare as Aug 6. Returns null on a
+  // malformed string so callers can decide how to handle it.
+  function parseHistoryDate(s) {
+    const [y, m, d] = String(s).slice(0, 10).split('-').map(Number);
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d);
+  }
+
   // Is cached chart history recent enough to trust? A pure TTL let stale data
   // (up to the 24h window) hide the most recent trading day. This checks the
   // actual content: the latest bar must be the most recent expected trading day
@@ -3150,10 +3161,9 @@
     if (!Array.isArray(history) || !history.length) return false;
     const last = history[history.length - 1]?.date;
     if (!last) return false;
-    // Parse "YYYY-MM-DD" as a local-midnight date to avoid UTC parse shifts
-    const [ly, lm, ld] = String(last).slice(0, 10).split('-').map(Number);
-    if (!ly || !lm || !ld) return false;
-    const latest = new Date(ly, lm - 1, ld);
+    // Parse as a local-midnight date to avoid UTC parse shifts (see parseHistoryDate)
+    const latest = parseHistoryDate(last);
+    if (!latest) return false;
     // Most recent expected trading day: today, rolled back over the weekend
     const expected = new Date(); expected.setHours(0, 0, 0, 0);
     const dow = expected.getDay(); // 0 Sun … 6 Sat
@@ -3317,7 +3327,8 @@
     // interior (start/end) so they don't get clipped at the chart's left/right edges
     const xLabelIdx = [...new Set([0, Math.floor(lastIdx / 2), lastIdx])];
     const xLabels = xLabelIdx.map(i => {
-      const d = new Date(history[i].date).toLocaleDateString('en-CA', { month:'short', day:'numeric' });
+      const d = (parseHistoryDate(history[i].date) || new Date(history[i].date))
+        .toLocaleDateString('en-CA', { month:'short', day:'numeric' });
       const anchor = i === 0 ? 'start' : (i === lastIdx ? 'end' : 'middle');
       return `<text x="${xScale(i).toFixed(0)}" y="${(pad.top + iH + 14).toFixed(0)}" text-anchor="${anchor}" fill="var(--muted)" font-size="9">${d}</text>`;
     }).join('');
@@ -3387,7 +3398,8 @@
       const cy   = yScale(d.close);
       hLine.setAttribute('x1', cx); hLine.setAttribute('x2', cx); hLine.setAttribute('opacity', '0.5');
       hDot.setAttribute('cx', cx);  hDot.setAttribute('cy', cy);  hDot.setAttribute('opacity', '1');
-      const dateStr = new Date(d.date).toLocaleDateString('en-CA', { month:'short', day:'numeric', year:'numeric' });
+      const dateStr = (parseHistoryDate(d.date) || new Date(d.date))
+        .toLocaleDateString('en-CA', { month:'short', day:'numeric', year:'numeric' });
       tooltip.textContent = `${dateStr}  $${d.close.toFixed(2)}`;
       tooltip.style.display = 'block';
 
@@ -5593,7 +5605,8 @@
     const xLabels = [0, Math.floor(strategy.length/2), strategy.length-1].map(i => {
       const d = strategy[i]?.date;
       if (!d) return '';
-      return `<text x="${xS(i, strategy.length).toFixed(0)}" y="${(pad.top + iH + 16).toFixed(0)}" text-anchor="middle" fill="var(--muted)" font-size="9">${new Date(d).toLocaleDateString('en-CA', {month:'short', year:'2-digit'})}</text>`;
+      const label = (parseHistoryDate(d) || new Date(d)).toLocaleDateString('en-CA', {month:'short', year:'2-digit'});
+      return `<text x="${xS(i, strategy.length).toFixed(0)}" y="${(pad.top + iH + 16).toFixed(0)}" text-anchor="middle" fill="var(--muted)" font-size="9">${label}</text>`;
     }).join('');
 
     wrap.innerHTML = `
