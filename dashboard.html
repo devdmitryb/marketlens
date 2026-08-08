@@ -1630,7 +1630,7 @@
     <!-- Closed positions -->
     <div id="portfolio-closed" style="display:none">
       <div class="closed-header">
-        <div>Symbol</div><div>Entry</div><div>Exit</div><div>Entry $</div><div>Exit $</div><div>P&L</div><div>Days</div><div>Exit Reason</div>
+        <div>Symbol</div><div>Entry</div><div>Exit</div><div>Entry $</div><div>Exit $</div><div>P&L</div><div>Days</div><div>Sell Note</div>
       </div>
       <div class="pos-table" id="closedPositionsTable">
         <div class="empty-state"><div class="big">📋</div><p>No closed positions yet.</p></div>
@@ -1828,7 +1828,7 @@
     <!-- Closed positions -->
     <div id="practice-closed" style="display:none">
       <div class="closed-header">
-        <div>Symbol</div><div>Entry</div><div>Exit</div><div>Entry $</div><div>Exit $</div><div>P&L</div><div>Days</div><div>Reason</div>
+        <div>Symbol</div><div>Entry</div><div>Exit</div><div>Entry $</div><div>Exit $</div><div>P&L</div><div>Days</div><div>Sell Note</div>
       </div>
       <div class="pos-table" id="practiceClosedTable">
         <div class="empty-state"><div class="big">📋</div><p>No closed practice positions yet.</p></div>
@@ -1990,16 +1990,6 @@
             <label>Exit Date</label>
             <input type="date" id="ps-date" />
           </div>
-          <div class="form-group">
-            <label>Reason</label>
-            <select id="ps-reason">
-              <option value="signal">Signal triggered</option>
-              <option value="target">Hit target</option>
-              <option value="trim">Partial trim</option>
-              <option value="stoploss">Stop-loss</option>
-              <option value="manual">Manual</option>
-            </select>
-          </div>
         </div>
         <div class="form-group" style="margin-bottom:0">
           <label>Why are you selling? <span style="color:var(--danger)">*</span></label>
@@ -2088,20 +2078,17 @@
         <label>Commission on Exit</label>
         <input type="number" id="cp-commission" value="15" min="0" step="any" />
       </div>
-      <div class="form-group">
-        <label>Exit Reason</label>
-        <select id="cp-reason">
-          <option value="signal">Signal triggered</option>
-          <option value="target">Reached analyst target</option>
-          <option value="stoploss">Stop-loss</option>
-          <option value="manual">Manual / gut feeling</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:0">
+      <label>Why are you selling? <span style="color:var(--danger)">*</span></label>
+      <textarea id="cp-note" rows="3" oninput="validateClosePosition()"
+        style="resize:vertical;min-height:70px;font-family:var(--sans);font-size:0.82rem"
+        placeholder="e.g. Hit target / signal turned SELL / rebalancing"></textarea>
+      <div class="note-hint err" id="cp-note-hint">Required: describe your reason for selling</div>
     </div>
     <div class="modal-actions">
       <button class="btn secondary" onclick="closeClosePosition()">Cancel</button>
-      <button class="btn" onclick="confirmClosePosition()">Close Position</button>
+      <button class="btn" id="cp-confirm" onclick="confirmClosePosition()">Close Position</button>
     </div>
   </div>
 </div>
@@ -3819,47 +3806,14 @@
         : '';
       const autoNote = `${signal} — ${reason}${upsideStr}`;
 
-      // Check existing lots in real portfolio and practice
-      const realLotsDrawer = openPositions.filter(p => p.sym === sym);
-      const pracLotsDrawer = practiceAccounts.flatMap(a =>
-        a.open.filter(p => p.sym === sym).map(p => ({ ...p, type: `🎮 ${a.name}` }))
-      );
-      const curPrice       = quote?.price || 0;
-
-      // Build existing positions summary
-      let existingSummaryHtml = '';
-      if (realLotsDrawer.length > 0 || pracLotsDrawer.length > 0) {
-        const allLots = [
-          ...realLotsDrawer.map(p => ({ ...p, type: '💼 Real' })),
-          ...pracLotsDrawer,
-        ];
-        const lotsRows = allLots.map(p => {
-          const pnl    = curPrice ? (curPrice - p.entryPrice) * p.shares - (p.entryComm || COMMISSION) - COMMISSION : null;
-          const pnlPct = pnl !== null ? (pnl / (p.entryPrice * p.shares) * 100) : null;
-          const color  = pnl >= 0 ? 'var(--accent2)' : 'var(--danger)';
-          return `<div style="display:grid;grid-template-columns:60px 50px 70px 70px 1fr;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:0.72rem;align-items:center">
-            <span style="color:var(--text-dim)">${p.type}</span>
-            <span>${p.shares}sh</span>
-            <span>@$${p.entryPrice.toFixed(2)}</span>
-            <span style="color:${color}">${pnl !== null ? (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(0) : '—'}</span>
-            <span style="color:${color}">${pnlPct !== null ? (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(1) + '%' : '—'}</span>
-          </div>`;
-        }).join('');
-        const avgEntry = allLots.reduce((s, p) => s + p.entryPrice * p.shares, 0) /
-                         allLots.reduce((s, p) => s + p.shares, 0);
-        existingSummaryHtml = `
-          <div style="background:rgba(200,241,53,0.06);border:1px solid rgba(200,241,53,0.2);border-radius:8px;padding:12px 14px;margin-bottom:8px">
-            <div style="font-size:0.65rem;font-weight:700;letter-spacing:0.1em;color:var(--accent);text-transform:uppercase;margin-bottom:8px">
-              ⚠️ You already hold ${sym} — ${allLots.length} lot${allLots.length > 1 ? 's' : ''}
-            </div>
-            ${lotsRows}
-            ${allLots.length > 1 ? `<div style="font-family:var(--mono);font-size:0.7rem;color:var(--text-dim);margin-top:6px">Avg entry: $${avgEntry.toFixed(2)}</div>` : ''}
-          </div>`;
-      }
+      const curPrice = quote?.price || 0;
+      // Existing lots for this symbol (real + practice) with per-lot editable notes,
+      // bought date and days held — built as its own re-renderable block (#drawerHoldings)
+      const existingSummaryHtml = buildDrawerHoldingsHTML(sym);
 
       document.getElementById('drawerActions').innerHTML = `
         <div style="width:100%">
-          ${existingSummaryHtml}
+          <div id="drawerHoldings">${existingSummaryHtml}</div>
           <div style="display:flex;gap:8px">
             <button id="drawerWatchBtn" class="btn secondary" style="flex:1" onclick="toggleWatchlistFromDrawer('${sym}')">
               ${inWatch ? '✓ In Watchlist' : '+ Add to Watchlist'}
@@ -4001,6 +3955,16 @@
   }
 
   // ── CLOSE POSITION ──
+  // Enable/disable the Close button based on the required sell note
+  function validateClosePosition() {
+    const note = (document.getElementById('cp-note')?.value || '').trim();
+    const btn  = document.getElementById('cp-confirm');
+    const hint = document.getElementById('cp-note-hint');
+    const ok   = note.length > 0;
+    if (btn)  btn.disabled = !ok;
+    if (hint) hint.className = 'note-hint' + (ok ? '' : ' err');
+  }
+
   function openClosePosition(id) {
     const pos = openPositions.find(p => p.id === id);
     if (!pos) return;
@@ -4009,6 +3973,8 @@
     document.getElementById('cp-date').value = new Date().toISOString().slice(0,10);
     document.getElementById('cp-price').value = livePortfolioPrices[pos.sym]?.toFixed(2) || '';
     document.getElementById('cp-commission').value = COMMISSION;
+    document.getElementById('cp-note').value = ''; // require a fresh sell rationale
+    validateClosePosition();
     document.getElementById('closePositionModal').classList.add('open');
   }
   function closeClosePosition() {
@@ -4019,8 +3985,9 @@
     const exitDate = document.getElementById('cp-date').value;
     const exitPrice= parseFloat(document.getElementById('cp-price').value);
     const exitComm = parseFloat(document.getElementById('cp-commission').value) || COMMISSION;
-    const reason   = document.getElementById('cp-reason').value;
+    const note     = (document.getElementById('cp-note').value || '').trim();
     if (!exitDate || !exitPrice) { alert('Please enter exit date and price.'); return; }
+    if (!note) { alert('Please add a note — why are you selling?'); document.getElementById('cp-note').focus(); return; }
 
     const idx = openPositions.findIndex(p => p.id === id);
     if (idx === -1) return;
@@ -4030,10 +3997,13 @@
     const grossPnl  = (exitPrice - pos.entryPrice) * pos.shares;
     const netPnl    = grossPnl - pos.entryComm - exitComm;
     const pnlPct    = (netPnl / (pos.entryPrice * pos.shares)) * 100;
+    // Snapshot the signal at close time so closed rows have a meaningful fallback
+    const exitSignal = stockData[pos.sym] ? calcSignal(stockData[pos.sym])?.signal : null;
 
+    // sellNote replaces the old reason dropdown; pos.note (buy reason) is kept via the spread
     closedPositions.unshift({
       ...pos,
-      exitDate, exitPrice, exitComm, reason,
+      exitDate, exitPrice, exitComm, sellNote: note, exitSignal,
       days: entryDays, grossPnl, netPnl, pnlPct
     });
     openPositions.splice(idx, 1);
@@ -4209,6 +4179,7 @@
       return;
     }
     tbl.innerHTML = '';
+    // Legacy fallback: records closed before the sell-note change stored a `reason` key
     const reasonLabel = { signal:'Signal', target:'Hit Target', stoploss:'Stop-Loss', manual:'Manual', other:'Other' };
     closedPositions.forEach((pos, i) => {
       const row = document.createElement('div');
@@ -4228,7 +4199,7 @@
           <span style="font-size:0.7rem;opacity:0.8">${pos.pnlPct >= 0 ? '+' : ''}${pos.pnlPct.toFixed(2)}%</span>
         </div>
         <div style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">${pos.days}d</div>
-        <div style="font-size:0.75rem;color:var(--text-dim)">${reasonLabel[pos.reason] || pos.reason}</div>
+        <div style="font-size:0.75rem;color:var(--text-dim);white-space:normal;line-height:1.4">${escapeHtml(pos.sellNote || pos.exitSignal || reasonLabel[pos.reason] || pos.reason || '—')}</div>
       `;
       tbl.appendChild(row);
     });
@@ -4945,7 +4916,6 @@
     const pos    = acc.open[posIdx];
     const sellSh = parseFloat(document.getElementById('ps-shares').value);
     const date   = document.getElementById('ps-date').value;
-    const reason = document.getElementById('ps-reason').value;
     const note   = (document.getElementById('ps-note').value || '').trim();
     let exitPrice= parseFloat(document.getElementById('ps-price').value);
 
@@ -4964,18 +4934,22 @@
     const pct    = (net / (pos.entryPrice * sellSh)) * 100;
     const days   = Math.round((new Date(date) - new Date(pos.date)) / 86400000);
 
-    acc.cash += sellSh * exitPrice - acc.commission;
-    acc.trades.push({ ts: new Date().toISOString(), type:'SELL', sym: pos.sym, shares: sellSh, price: exitPrice, commission: acc.commission, pnl: net, reason, note });
+    // Snapshot the signal at close time so closed rows have a meaningful fallback
+    const exitSignal = stockData[pos.sym] ? calcSignal(stockData[pos.sym])?.signal : null;
 
-    // sellNote keeps the sell rationale distinct from pos.note (the original buy reason)
+    acc.cash += sellSh * exitPrice - acc.commission;
+    acc.trades.push({ ts: new Date().toISOString(), type:'SELL', sym: pos.sym, shares: sellSh, price: exitPrice, commission: acc.commission, pnl: net, note });
+
+    // sellNote is the required sell rationale (replaces the old reason dropdown);
+    // pos.note (the original buy reason) is preserved separately via the spread.
     if (sellSh >= pos.shares) {
       // Full close
-      acc.closed.unshift({ ...pos, exitDate: date, exitPrice, exitComm: acc.commission, reason, sellNote: note, days, netPnl: net, pnlPct: pct });
+      acc.closed.unshift({ ...pos, exitDate: date, exitPrice, exitComm: acc.commission, sellNote: note, exitSignal, days, netPnl: net, pnlPct: pct });
       acc.open.splice(posIdx, 1);
     } else {
       // Partial sell
       acc.open[posIdx].shares -= sellSh;
-      acc.closed.unshift({ ...pos, shares: sellSh, exitDate: date, exitPrice, exitComm: acc.commission, reason, sellNote: note, days, netPnl: net, pnlPct: pct });
+      acc.closed.unshift({ ...pos, shares: sellSh, exitDate: date, exitPrice, exitComm: acc.commission, sellNote: note, exitSignal, days, netPnl: net, pnlPct: pct });
     }
 
     savePracticeAccounts();
@@ -5034,6 +5008,113 @@
       e.stopPropagation();
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }          // save
       else if (e.key === 'Escape') { done = true; rerenderNoteHost(kind); }              // cancel
+    });
+  }
+
+  // ── DRAWER "YOU ALREADY HOLD" LOTS (editable notes + bought/held dates) ──
+  function drawerLotCurPrice(sym) {
+    return stockData[sym]?.quote?.price || livePortfolioPrices[sym] || livePracticePrices[sym] || 0;
+  }
+  // Entry date is a "YYYY-MM-DD" input string — parse as local (parseHistoryDate)
+  // to avoid the UTC day-shift, for both the label and the days-held count.
+  function fmtEntryDate(dateStr) {
+    const d = parseHistoryDate(dateStr) || new Date(dateStr);
+    return isNaN(d) ? '—' : d.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+  }
+  function daysHeld(dateStr) {
+    const d = parseHistoryDate(dateStr) || new Date(dateStr);
+    return isNaN(d) ? 0 : Math.max(0, Math.round((Date.now() - d.getTime()) / 86400000));
+  }
+  // Locate a lot for note editing. Practice lots can belong to any account (the
+  // drawer aggregates across all of them), so we look up by accountId, not the
+  // currently-selected practice account.
+  function findDrawerPosition(kind, accountId, id) {
+    if (kind === 'practice') {
+      const acc = practiceAccounts.find(a => a.id == accountId);
+      return acc?.open.find(p => p.id == id) || null;
+    }
+    return openPositions.find(p => p.id == id) || null;
+  }
+  function buildDrawerHoldingsHTML(sym) {
+    const realLots = openPositions.filter(p => p.sym === sym)
+      .map(p => ({ ...p, _kind:'portfolio', _acct:'', type:'💼 Real' }));
+    const pracLots = practiceAccounts.flatMap(a =>
+      a.open.filter(p => p.sym === sym).map(p => ({ ...p, _kind:'practice', _acct:a.id, type:`🎮 ${a.name}` }))
+    );
+    const allLots = [...realLots, ...pracLots];
+    if (!allLots.length) return '';
+    const curPrice = drawerLotCurPrice(sym);
+    const lotsRows = allLots.map(p => {
+      const pnl    = curPrice ? (curPrice - p.entryPrice) * p.shares - (p.entryComm || COMMISSION) - COMMISSION : null;
+      const pnlPct = pnl !== null ? (pnl / (p.entryPrice * p.shares) * 100) : null;
+      const color  = pnl >= 0 ? 'var(--accent2)' : 'var(--danger)';
+      const held   = daysHeld(p.date);
+      return `
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="display:grid;grid-template-columns:84px 40px 62px 1fr;gap:8px;align-items:center;font-family:var(--mono);font-size:0.72rem">
+            <span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(p.type)}">${p.type}</span>
+            <span>${p.shares}sh</span>
+            <span>@$${p.entryPrice.toFixed(2)}</span>
+            <span style="text-align:right;color:${color}">${pnl !== null ? (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(0) + ' (' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(1) + '%)' : '—'}</span>
+          </div>
+          <div style="display:flex;gap:12px;margin-top:3px;font-family:var(--mono);font-size:0.66rem;color:var(--muted)">
+            <span>Bought: ${fmtEntryDate(p.date)}</span>
+            <span>Held: ${held} day${held === 1 ? '' : 's'}</span>
+          </div>
+          <div class="editable-note" title="Click to edit note"
+            style="margin-top:4px;white-space:normal;font-size:0.72rem;color:var(--text-dim);cursor:text"
+            onclick="startDrawerNoteEdit(event,'${p._kind}','${p._acct}',${p.id},'${sym}')">
+            📝 ${p.note ? escapeHtml(p.note) : '<span style="color:var(--muted)">Add note…</span>'}<span class="note-edit-pencil">✏️</span>
+          </div>
+        </div>`;
+    }).join('');
+    const avgEntry = allLots.reduce((s, p) => s + p.entryPrice * p.shares, 0) /
+                     allLots.reduce((s, p) => s + p.shares, 0);
+    return `
+      <div style="background:rgba(200,241,53,0.06);border:1px solid rgba(200,241,53,0.2);border-radius:8px;padding:12px 14px;margin-bottom:8px">
+        <div style="font-size:0.65rem;font-weight:700;letter-spacing:0.1em;color:var(--accent);text-transform:uppercase;margin-bottom:8px">
+          ⚠️ You already hold ${escapeHtml(sym)} — ${allLots.length} lot${allLots.length > 1 ? 's' : ''}
+        </div>
+        ${lotsRows}
+        ${allLots.length > 1 ? `<div style="font-family:var(--mono);font-size:0.7rem;color:var(--text-dim);margin-top:6px">Avg entry: $${avgEntry.toFixed(2)}</div>` : ''}
+      </div>`;
+  }
+  function startDrawerNoteEdit(ev, kind, accountId, id, sym) {
+    ev.stopPropagation();
+    const cell = ev.currentTarget;
+    if (cell.querySelector('textarea')) return;
+    const pos = findDrawerPosition(kind, accountId, id);
+    if (!pos) return;
+    const ta = document.createElement('textarea');
+    ta.className = 'note-edit-ta';
+    ta.value = pos.note || '';
+    cell.innerHTML = '';
+    cell.appendChild(ta);
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+
+    let done = false;
+    const rerender = () => {
+      const host = document.getElementById('drawerHoldings');
+      if (host) host.innerHTML = buildDrawerHoldingsHTML(sym);
+    };
+    const commit = () => {
+      if (done) return; done = true;
+      const p = findDrawerPosition(kind, accountId, id);
+      if (p) {
+        p.note = ta.value.trim();
+        if (kind === 'practice') savePracticeAccounts(); else savePortfolio();
+      }
+      rerender();
+      // keep the underlying position tables in sync with the edited note
+      if (kind === 'practice') renderPractice(); else renderOpenPositions();
+    };
+    ta.addEventListener('blur', commit);
+    ta.addEventListener('click', e => e.stopPropagation());
+    ta.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
+      else if (e.key === 'Escape') { done = true; rerender(); }
     });
   }
 
@@ -5147,6 +5228,7 @@
       closedTbl.innerHTML = `<div class="empty-state"><div class="big">📋</div><p>No closed practice positions.</p></div>`;
     } else {
       closedTbl.innerHTML = '';
+      // Legacy fallback: records closed before the sell-note change stored a `reason` key
       const reasonLabel = { signal:'Signal', target:'Hit Target', trim:'Partial Trim', stoploss:'Stop-Loss', manual:'Manual' };
       acc.closed.forEach((pos, i) => {
         const row = document.createElement('div');
@@ -5164,7 +5246,7 @@
             <span style="font-size:0.7rem;opacity:0.8">${pos.pnlPct >= 0 ? '+' : ''}${pos.pnlPct.toFixed(1)}%</span>
           </div>
           <div style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">${pos.days}d</div>
-          <div style="font-size:0.75rem;color:var(--text-dim)">${reasonLabel[pos.reason]||pos.reason}</div>`;
+          <div style="font-size:0.75rem;color:var(--text-dim);white-space:normal;line-height:1.4">${escapeHtml(pos.sellNote || pos.exitSignal || reasonLabel[pos.reason] || pos.reason || '—')}</div>`;
         closedTbl.appendChild(row);
       });
     }
