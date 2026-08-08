@@ -225,6 +225,45 @@ app.get('/api/screener', auth, async (req, res) => {
 });
 
 // Quote — serve from cache, refresh if stale
+// ── Symbol search (header autocomplete) ───────────────────────────
+// In-memory cache keyed by lowercased query (5 min TTL) to avoid hammering FMP
+// while the user types. Bounded to keep memory in check.
+const searchCache = {}; // { [q]: { results, ts } }
+const SEARCH_TTL  = 5 * 60 * 1000;
+app.get('/api/search', auth, async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (q.length < 2) return res.json([]);
+  const key = q.toLowerCase();
+
+  const cached = searchCache[key];
+  if (cached && Date.now() - cached.ts < SEARCH_TTL) {
+    return res.json(cached.results);
+  }
+
+  try {
+    const raw = await fmp.search(q, 8);
+    const results = raw.slice(0, 8).map(r => ({
+      symbol:   r.symbol,
+      name:     r.name || '',
+      exchange: r.exchangeShortName || r.stockExchange || '',
+    }));
+
+    // Bound the cache — drop the oldest entry once it grows too large
+    const keys = Object.keys(searchCache);
+    if (keys.length > 200) {
+      let oldest = keys[0];
+      for (const k of keys) if (searchCache[k].ts < searchCache[oldest].ts) oldest = k;
+      delete searchCache[oldest];
+    }
+    searchCache[key] = { results, ts: Date.now() };
+
+    res.json(results);
+  } catch(e) {
+    console.error(`[fmp] search failed for "${q}":`, e.message);
+    res.status(502).json({ error: 'search failed' });
+  }
+});
+
 app.get('/api/quote/:sym', auth, async (req, res) => {
   const sym = req.params.sym.toUpperCase();
 

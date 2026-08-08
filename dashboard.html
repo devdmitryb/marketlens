@@ -108,6 +108,37 @@
       background: var(--accent2);
       animation: pulse 2s infinite;
     }
+    /* ── Header symbol-search autocomplete ── */
+    #quickSymDropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      width: 260px;
+      max-width: 80vw;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+      z-index: 1000;
+      max-height: 320px;
+      overflow-y: auto;
+      display: none;
+    }
+    #quickSymDropdown.open { display: block; }
+    .qs-item {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+    }
+    .qs-item:last-child { border-bottom: none; }
+    .qs-item:hover, .qs-item.active { background: rgba(200,241,53,0.1); }
+    .qs-item .qs-sym  { font-family: var(--mono); font-weight: 700; font-size: 0.82rem; color: var(--text); }
+    .qs-item .qs-name { font-size: 0.72rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+    .qs-item .qs-exch { font-size: 0.6rem; color: var(--muted); font-family: var(--mono); flex-shrink: 0; }
+    .qs-empty { padding: 10px; font-size: 0.75rem; color: var(--muted); text-align: center; }
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.3; }
@@ -1153,6 +1184,8 @@
       /* Quick symbol search — icon only on mobile */
       #quickSymWrapper { display: none !important; }
       #quickSymBtn { display: flex !important; }
+      /* Center the autocomplete dropdown under the expanded field on mobile */
+      #quickSymDropdown { left: 50%; transform: translateX(-50%); width: 90vw; max-width: 340px; }
 
       /* ── SCREENER ── */
       .screener-header { display: none; }
@@ -1414,14 +1447,15 @@
 
 <header>
   <div class="logo">Market<span>Lens</span></div>
-  <div id="quickSymWrapper" style="display:flex;align-items:center;gap:6px;min-width:100px;max-width:160px">
+  <div id="quickSymWrapper" style="display:flex;align-items:center;gap:6px;min-width:100px;max-width:160px;position:relative">
     <input id="quickSymInput" type="search" placeholder="🔍 Symbol…"
       autocomplete="off" autocorrect="off" autocapitalize="characters"
       spellcheck="false" inputmode="text"
       style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.82rem;padding:6px 10px;border-radius:7px;outline:none;width:100%;text-transform:uppercase"
-      oninput="this.value=this.value.toUpperCase()"
-      onkeydown="if(event.key==='Enter'&&this.value.trim()){openDrawer(this.value.trim());this.value='';this.blur()}"
-      onblur="if(!this.value){const w=document.getElementById('quickSymWrapper');const b=document.getElementById('quickSymBtn');if(window.innerWidth<=768){w.style.cssText='display:none!important';b.style.display='flex';}}" />
+      oninput="onQuickSymInput(this)"
+      onkeydown="onQuickSymKeydown(event, this)"
+      onblur="onQuickSymBlur(this)" />
+    <div id="quickSymDropdown" role="listbox"></div>
   </div>
   <button id="quickSymBtn"
     style="display:none;background:none;border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;cursor:pointer;font-size:1rem"
@@ -3482,6 +3516,119 @@
   // ══════════════════════════════════════════
   let currentDrawerSym    = null;
   let currentDrawerSignal = null; // main signal for the open drawer, used by Combined Signal
+
+  // ══════════════════════════════════════════
+  //  HEADER SYMBOL-SEARCH AUTOCOMPLETE
+  // ══════════════════════════════════════════
+  let symSearchResults  = [];
+  let symSearchActive   = -1;   // index of keyboard-highlighted result, -1 = none
+  let symSearchDebounce = null;
+  let symSearchSeq      = 0;     // guards against out-of-order responses
+
+  function onQuickSymInput(el) {
+    el.value = el.value.toUpperCase();
+    const q = el.value.trim();
+    clearTimeout(symSearchDebounce);
+    if (q.length < 2) { hideSymbolDropdown(); return; }
+    symSearchDebounce = setTimeout(() => fetchSymbolSearch(q), 300);
+  }
+
+  async function fetchSymbolSearch(q) {
+    if (serverAvailable === false) return; // search needs the server (FMP key is server-side)
+    const seq = ++symSearchSeq;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/search?q=${encodeURIComponent(q)}`, {
+        headers: { 'x-app-token': APP_TOKEN }
+      });
+      if (!res.ok) return;
+      const results = await res.json();
+      if (seq !== symSearchSeq) return; // a newer keystroke superseded this response
+      const el = document.getElementById('quickSymInput');
+      if (!el || el.value.trim().length < 2) { hideSymbolDropdown(); return; }
+      renderSymbolDropdown(Array.isArray(results) ? results : []);
+    } catch { /* network error — silently ignore; Enter-to-open still works */ }
+  }
+
+  function renderSymbolDropdown(results) {
+    const dd = document.getElementById('quickSymDropdown');
+    if (!dd) return;
+    symSearchResults = results.slice(0, 8);
+    symSearchActive  = -1;
+    if (!symSearchResults.length) {
+      dd.innerHTML = `<div class="qs-empty">No matches</div>`;
+      dd.classList.add('open');
+      return;
+    }
+    dd.innerHTML = symSearchResults.map((r, i) => `
+      <div class="qs-item" role="option" data-idx="${i}"
+        onmousedown="event.preventDefault()"
+        onclick="selectSymbolResult(${i})">
+        <span class="qs-sym">${escapeHtml(r.symbol || '')}</span>
+        <span class="qs-name">${escapeHtml(r.name || '')}</span>
+        <span class="qs-exch">${escapeHtml(r.exchange || '')}</span>
+      </div>`).join('');
+    dd.classList.add('open');
+  }
+
+  function hideSymbolDropdown() {
+    const dd = document.getElementById('quickSymDropdown');
+    if (dd) { dd.classList.remove('open'); dd.innerHTML = ''; }
+    symSearchResults = [];
+    symSearchActive  = -1;
+  }
+
+  function setSymbolActive(idx) {
+    const dd = document.getElementById('quickSymDropdown');
+    if (!dd) return;
+    const items = dd.querySelectorAll('.qs-item');
+    if (!items.length) return;
+    symSearchActive = (idx + items.length) % items.length; // wrap around
+    items.forEach((it, i) => it.classList.toggle('active', i === symSearchActive));
+    items[symSearchActive].scrollIntoView({ block: 'nearest' });
+  }
+
+  function selectSymbolResult(idx) {
+    const r = symSearchResults[idx];
+    if (!r) return;
+    const el = document.getElementById('quickSymInput');
+    hideSymbolDropdown();
+    if (el) { el.value = ''; el.blur(); }
+    openDrawer(r.symbol);
+  }
+
+  function onQuickSymKeydown(e, el) {
+    const dd   = document.getElementById('quickSymDropdown');
+    const open = dd && dd.classList.contains('open') && symSearchResults.length > 0;
+    if (e.key === 'ArrowDown' && open) { e.preventDefault(); setSymbolActive(symSearchActive + 1); return; }
+    if (e.key === 'ArrowUp'   && open) { e.preventDefault(); setSymbolActive(symSearchActive - 1); return; }
+    if (e.key === 'Escape') { hideSymbolDropdown(); return; }
+    if (e.key === 'Enter') {
+      if (open && symSearchActive >= 0) {
+        e.preventDefault();
+        selectSymbolResult(symSearchActive);
+      } else if (el.value.trim()) {
+        // No highlighted result → existing behavior: open the typed value as-is
+        openDrawer(el.value.trim());
+        el.value = '';
+        hideSymbolDropdown();
+        el.blur();
+      }
+    }
+  }
+
+  function onQuickSymBlur(el) {
+    // Delay hiding so a click/tap on a dropdown item registers first
+    setTimeout(() => {
+      hideSymbolDropdown();
+      // Preserve the mobile behavior: collapse the field back to an icon when empty
+      if (!el.value && window.innerWidth <= 768) {
+        const w = document.getElementById('quickSymWrapper');
+        const b = document.getElementById('quickSymBtn');
+        if (w) w.style.cssText = 'display:none!important';
+        if (b) b.style.display = 'flex';
+      }
+    }, 150);
+  }
 
   function openDrawer(sym) {
     currentDrawerSym = sym;
