@@ -3142,6 +3142,27 @@
       </div>`;
   }
 
+  // Is cached chart history recent enough to trust? A pure TTL let stale data
+  // (up to the 24h window) hide the most recent trading day. This checks the
+  // actual content: the latest bar must be the most recent expected trading day
+  // (or the day before it, for pre-open when today's bar isn't published yet).
+  function isChartDataFresh(history) {
+    if (!Array.isArray(history) || !history.length) return false;
+    const last = history[history.length - 1]?.date;
+    if (!last) return false;
+    // Parse "YYYY-MM-DD" as a local-midnight date to avoid UTC parse shifts
+    const [ly, lm, ld] = String(last).slice(0, 10).split('-').map(Number);
+    if (!ly || !lm || !ld) return false;
+    const latest = new Date(ly, lm - 1, ld);
+    // Most recent expected trading day: today, rolled back over the weekend
+    const expected = new Date(); expected.setHours(0, 0, 0, 0);
+    const dow = expected.getDay(); // 0 Sun … 6 Sat
+    if (dow === 0) expected.setDate(expected.getDate() - 2);      // Sun → Fri
+    else if (dow === 6) expected.setDate(expected.getDate() - 1); // Sat → Fri
+    const ageDays = Math.round((expected - latest) / 86400000);
+    return ageDays <= 1;
+  }
+
   async function loadChart(sym, days, btnEl) {
     // Update active button
     if (btnEl) {
@@ -3155,11 +3176,17 @@
 
     const cacheKey = `${sym}_${days}`;
     let history = chartCache[cacheKey];
+    // Drop stale in-memory cache so a missing recent trading day triggers a refetch
+    if (history && !isChartDataFresh(history)) history = null;
 
-    // Try localStorage cache first (24h TTL — safe for historical + rare splits)
+    // Fall back to localStorage cache, but only if it's fresh enough (see
+    // isChartDataFresh) — the 24h TTL is a backstop, not the freshness gate.
     if (!history) {
-      history = cacheGet(`chart_${cacheKey}`, 'target'); // reuse 24h TTL
-      if (history) chartCache[cacheKey] = history; // warm in-memory cache too
+      const cached = cacheGet(`chart_${cacheKey}`, 'target');
+      if (cached && isChartDataFresh(cached)) {
+        history = cached;
+        chartCache[cacheKey] = history; // warm in-memory cache too
+      }
     }
 
     if (!history) {
