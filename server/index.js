@@ -344,7 +344,15 @@ app.get('/api/history/:sym', auth, async (req, res) => {
     const coveredDays = earliest && latest
       ? Math.round((latest - earliest) / (1000 * 60 * 60 * 24))
       : 0;
-    const coverageOk = rows.length > 0 && coveredDays >= requestedDays * 0.8;
+    // Recency check — span coverage alone can pass while the latest row is days
+    // stale (missing the most recent trading days). Require the latest row to be
+    // within 3 calendar days of today, otherwise re-fetch to pull the gap.
+    const latestAgeDays = latest
+      ? Math.round((today - latest) / (1000 * 60 * 60 * 24))
+      : Infinity;
+    const coverageOk = rows.length > 0
+      && coveredDays >= requestedDays * 0.8
+      && latestAgeDays <= 3;
 
     if (!coverageOk) {
       const fresh = await fmp.getHistory(sym, from);

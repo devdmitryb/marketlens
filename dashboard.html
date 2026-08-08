@@ -3142,6 +3142,27 @@
       </div>`;
   }
 
+  // Is cached chart history recent enough to trust? A pure TTL let stale data
+  // (up to the 24h window) hide the most recent trading day. This checks the
+  // actual content: the latest bar must be the most recent expected trading day
+  // (or the day before it, for pre-open when today's bar isn't published yet).
+  function isChartDataFresh(history) {
+    if (!Array.isArray(history) || !history.length) return false;
+    const last = history[history.length - 1]?.date;
+    if (!last) return false;
+    // Parse "YYYY-MM-DD" as a local-midnight date to avoid UTC parse shifts
+    const [ly, lm, ld] = String(last).slice(0, 10).split('-').map(Number);
+    if (!ly || !lm || !ld) return false;
+    const latest = new Date(ly, lm - 1, ld);
+    // Most recent expected trading day: today, rolled back over the weekend
+    const expected = new Date(); expected.setHours(0, 0, 0, 0);
+    const dow = expected.getDay(); // 0 Sun … 6 Sat
+    if (dow === 0) expected.setDate(expected.getDate() - 2);      // Sun → Fri
+    else if (dow === 6) expected.setDate(expected.getDate() - 1); // Sat → Fri
+    const ageDays = Math.round((expected - latest) / 86400000);
+    return ageDays <= 1;
+  }
+
   async function loadChart(sym, days, btnEl) {
     // Update active button
     if (btnEl) {
@@ -3155,11 +3176,17 @@
 
     const cacheKey = `${sym}_${days}`;
     let history = chartCache[cacheKey];
+    // Drop stale in-memory cache so a missing recent trading day triggers a refetch
+    if (history && !isChartDataFresh(history)) history = null;
 
-    // Try localStorage cache first (24h TTL — safe for historical + rare splits)
+    // Fall back to localStorage cache, but only if it's fresh enough (see
+    // isChartDataFresh) — the 24h TTL is a backstop, not the freshness gate.
     if (!history) {
-      history = cacheGet(`chart_${cacheKey}`, 'target'); // reuse 24h TTL
-      if (history) chartCache[cacheKey] = history; // warm in-memory cache too
+      const cached = cacheGet(`chart_${cacheKey}`, 'target');
+      if (cached && isChartDataFresh(cached)) {
+        history = cached;
+        chartCache[cacheKey] = history; // warm in-memory cache too
+      }
     }
 
     if (!history) {
@@ -3226,7 +3253,9 @@
 
     const W = wrap.offsetWidth || 320;
     const H = 150;
-    const pad = { top: 10, right: 12, bottom: 24, left: 44 };
+    // right pad leaves room for the latest-price marker + its label so the
+    // most recent data point (and its price) is never clipped at the edge
+    const pad = { top: 10, right: 52, bottom: 24, left: 44 };
     const iW  = W - pad.left - pad.right;
     const iH  = H - pad.top  - pad.bottom;
 
@@ -3235,7 +3264,10 @@
     const maxP    = Math.max(...prices);
     const range   = maxP - minP || 1;
 
-    const xScale = i  => pad.left + (i / (history.length - 1)) * iW;
+    const lastIdx = history.length - 1;
+    // denom guards division-by-zero when there's a single data point (length 1)
+    const denom   = lastIdx || 1;
+    const xScale = i  => pad.left + (i / denom) * iW;
     const yScale = p  => pad.top  + iH - ((p - minP) / range) * iH;
 
     // Build polyline points
@@ -3243,7 +3275,7 @@
 
     // Area fill path
     const firstX = xScale(0).toFixed(1);
-    const lastX  = xScale(history.length - 1).toFixed(1);
+    const lastX  = xScale(lastIdx).toFixed(1);
     const baseY  = (pad.top + iH).toFixed(1);
     const areaPath = `M${firstX},${baseY} ` +
       history.map((d, i) => `L${xScale(i).toFixed(1)},${yScale(d.close).toFixed(1)}`).join(' ') +
@@ -3281,10 +3313,13 @@
       `<text x="${(pad.left - 4).toFixed(0)}" y="${yScale(v).toFixed(0)}" text-anchor="end" fill="var(--muted)" font-size="9" dominant-baseline="middle">$${v.toFixed(0)}</text>`
     ).join('');
 
-    // X axis labels (start / mid / end)
-    const xLabels = [0, Math.floor(history.length/2), history.length-1].map(i => {
+    // X axis labels (start / mid / end) — anchor the first/last labels toward the
+    // interior (start/end) so they don't get clipped at the chart's left/right edges
+    const xLabelIdx = [...new Set([0, Math.floor(lastIdx / 2), lastIdx])];
+    const xLabels = xLabelIdx.map(i => {
       const d = new Date(history[i].date).toLocaleDateString('en-CA', { month:'short', day:'numeric' });
-      return `<text x="${xScale(i).toFixed(0)}" y="${(pad.top + iH + 14).toFixed(0)}" text-anchor="middle" fill="var(--muted)" font-size="9">${d}</text>`;
+      const anchor = i === 0 ? 'start' : (i === lastIdx ? 'end' : 'middle');
+      return `<text x="${xScale(i).toFixed(0)}" y="${(pad.top + iH + 14).toFixed(0)}" text-anchor="${anchor}" fill="var(--muted)" font-size="9">${d}</text>`;
     }).join('');
 
     wrap.innerHTML = `
@@ -3318,6 +3353,12 @@
             ${targetClamped ? '▲ ' : ''}target $${targetPrice.toFixed(2)}${targetClamped ? ' (above)' : ''}
           </text>
         ` : ''}
+        <!-- Latest price marker + label (rightmost / most-recent point). Label y is
+             clamped inside the plot so it never clips at the top/bottom edges. -->
+        <circle cx="${lastX}" cy="${yScale(prices[lastIdx]).toFixed(1)}" r="3" fill="${colour}"/>
+        <text x="${(parseFloat(lastX) + 6).toFixed(0)}"
+          y="${Math.max(pad.top + 5, Math.min(pad.top + iH - 5, yScale(prices[lastIdx]))).toFixed(0)}"
+          text-anchor="start" dominant-baseline="middle" fill="${colour}" font-size="9" font-weight="600">$${prices[lastIdx].toFixed(2)}</text>
         <!-- Labels -->
         ${yLabels}
         ${xLabels}
@@ -3349,8 +3390,26 @@
       const dateStr = new Date(d.date).toLocaleDateString('en-CA', { month:'short', day:'numeric', year:'numeric' });
       tooltip.textContent = `${dateStr}  $${d.close.toFixed(2)}`;
       tooltip.style.display = 'block';
-      tooltip.style.left = `${cx}px`;
-      tooltip.style.top  = `${Math.max(0, cy - 28)}px`;
+
+      // Edge-aware placement: the tooltip is centred by default (translateX(-50%)),
+      // but near the left/right edges that overflows the chart, so switch anchoring.
+      const tw = tooltip.offsetWidth;
+      const th = tooltip.offsetHeight;
+      if (cx - tw / 2 < 0) {
+        // too close to the left edge → anchor tooltip's left to the point
+        tooltip.style.left = `${cx}px`;
+        tooltip.style.transform = 'translateX(0)';
+      } else if (cx + tw / 2 > W) {
+        // too close to the right edge → anchor tooltip's right to the point
+        tooltip.style.left = `${cx}px`;
+        tooltip.style.transform = 'translateX(-100%)';
+      } else {
+        tooltip.style.left = `${cx}px`;
+        tooltip.style.transform = 'translateX(-50%)';
+      }
+      // Prefer above the point; flip below if it would clip the top edge.
+      const above = cy - th - 6;
+      tooltip.style.top = `${above < 0 ? cy + 8 : above}px`;
     });
     svg.addEventListener('mouseleave', hideHover);
     function hideHover() {
