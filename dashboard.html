@@ -2184,6 +2184,14 @@
     if (name === 'backtest') {
       initBacktestSymbolSelector();
     }
+    if (name === 'dashboard') {
+      // Auto-load signals & prices from cache on open — no manual Refresh needed.
+      if (watchlist.length > 0 && Object.keys(stockData).length === 0 && serverAvailable) {
+        loadWatchlistFromCache();
+      } else {
+        renderAll();
+      }
+    }
     if (name === 'practice') {
       initPracticeAccounts();
       if (serverAvailable) {
@@ -2589,6 +2597,68 @@
     }
   }
 
+  // Auto-load the watchlist from server DB cache — signals + prices only, no FMP.
+  // Signals come pre-computed by cron (GET /api/signals); quotes come from the
+  // quotes_cache (GET /api/quote/:sym). Used on tab open / init so cards populate
+  // without the user clicking Refresh. The ↻ Refresh button still calls refreshAll()
+  // for a full forced recalculation.
+  async function loadWatchlistFromCache() {
+    if (!serverAvailable || !APP_TOKEN || watchlist.length === 0) return;
+    const headers = { 'x-app-token': APP_TOKEN };
+
+    // Subtle loading indicator — only when the grid is currently empty
+    const grid = document.getElementById('stocksGrid');
+    if (grid && !grid.querySelector('.stock-card')) {
+      grid.innerHTML = `<div class="empty-state">
+        <div class="spinner"></div>
+        <p>Loading signals & prices from cache…</p>
+      </div>`;
+    }
+
+    try {
+      // 1. All pre-computed signals in one call
+      const signals = await fetch(`${SERVER_URL}/api/signals`, { headers })
+        .then(r => r.ok ? r.json() : {})
+        .catch(() => ({}));
+
+      // 2. Cached quotes, in parallel batches of 10
+      const quotes = {};
+      for (let i = 0; i < watchlist.length; i += 10) {
+        const batch = watchlist.slice(i, i + 10);
+        const results = await Promise.all(batch.map(sym =>
+          fetch(`${SERVER_URL}/api/quote/${sym}`, { headers })
+            .then(r => r.ok ? r.json() : null)
+            .catch(() => null)
+        ));
+        batch.forEach((sym, j) => { quotes[sym] = results[j]; });
+      }
+
+      // 3. Combine into stockData[sym] for buildCard()
+      watchlist.forEach(sym => {
+        const sig = signals[sym] || signals[sym.toUpperCase()] || null;
+        let quote = quotes[sym];
+        if (quote && quote.price == null) quote = null;
+        // Fall back to the price cron stored on the signal if no cached quote
+        if (!quote && sig && sig.price != null) {
+          quote = { price: sig.price, changePercentage: 0 };
+        }
+        const tally  = sig?.tally || { buy: 0, hold: 0, sell: 0 };
+        const target = sig?.target != null ? { targetConsensus: sig.target } : null;
+        stockData[sym] = {
+          quote, target, tally,
+          momentum: null,
+          serverSignal: sig ? { signal: sig.signal, reason: sig.reason } : null,
+        };
+      });
+
+      renderAll();
+      updateStatusIndicator(isMarketOpen() ? 'cached' : 'closed');
+    } catch (e) {
+      console.warn('loadWatchlistFromCache failed:', e.message);
+      renderAll();
+    }
+  }
+
   // ══════════════════════════════════════════
   //  SIGNAL ENGINE — IX HUNTING STRATEGY
   // ══════════════════════════════════════════
@@ -2675,6 +2745,11 @@
   }
 
   function calcSignal(data) {
+    // Cache-loaded cards carry the full momentum signal cron already computed
+    // from price_history (see loadWatchlistFromCache). The client can't recompute
+    // it — the /api/signals payload has no momentum series — so trust it verbatim.
+    if (data.serverSignal) return data.serverSignal;
+
     const { quote, target, tally, momentum } = data;
     if (!quote || !target) return { signal: 'WAIT', reason: 'Insufficient data' };
 
@@ -6218,7 +6293,9 @@
     }
     if (connected) {
       loadOverview();
-      if (watchlist.length > 0) refreshAll();
+      // Watchlist is the default landing page — auto-load its signals & prices from
+      // the DB cache (no FMP). ↻ Refresh still triggers refreshAll() for a full recalc.
+      if (watchlist.length > 0) loadWatchlistFromCache();
       refreshPortfolioPrices();
       setTimeout(() => {
         const portfolioSyms = openPositions.map(p => p.sym);
