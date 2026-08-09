@@ -1604,20 +1604,19 @@
             style="width:90px;accent-color:var(--accent);cursor:pointer" />
           <span id="thresholdLabel" style="font-family:var(--mono);color:var(--accent);min-width:36px">20%</span>
         </label>
-        <select id="screenerMarketCap" title="Filter by market cap" onchange="setScreenerMarketCap(this.value)"
-          style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--sans);font-size:0.75rem;padding:7px 10px;border-radius:8px;outline:none;cursor:pointer">
-          <option value="any">Any size</option>
-          <option value="large">Large (&gt;$10B)</option>
-          <option value="mid">Mid ($1B–$10B)</option>
-          <option value="small">Small ($100M–$1B)</option>
-          <option value="micro">Micro (&lt;$100M)</option>
-        </select>
+        <div style="display:flex;align-items:center;gap:10px;font-size:0.75rem;color:var(--text-dim);background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 12px;white-space:nowrap">
+          <span>Size:</span>
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer" title="Market cap &gt; $10B"><input type="checkbox" checked onchange="setScreenerSizeFilter('large', this.checked)" style="accent-color:var(--accent);cursor:pointer" />Large</label>
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer" title="Market cap $1B–$10B"><input type="checkbox" checked onchange="setScreenerSizeFilter('mid', this.checked)" style="accent-color:var(--accent);cursor:pointer" />Mid</label>
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer" title="Market cap $100M–$1B"><input type="checkbox" checked onchange="setScreenerSizeFilter('small', this.checked)" style="accent-color:var(--accent);cursor:pointer" />Small</label>
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer" title="Market cap &lt; $100M"><input type="checkbox" checked onchange="setScreenerSizeFilter('micro', this.checked)" style="accent-color:var(--accent);cursor:pointer" />Micro</label>
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer" title="No market cap data available"><input type="checkbox" checked onchange="setScreenerSizeFilter('unknown', this.checked)" style="accent-color:var(--accent);cursor:pointer" />Unknown</label>
+        </div>
         <select id="screenerFreshness" title="Filter by rating recency" onchange="setScreenerFreshness(this.value)"
           style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--sans);font-size:0.75rem;padding:7px 10px;border-radius:8px;outline:none;cursor:pointer">
-          <option value="any">Any time</option>
-          <option value="week">This week</option>
-          <option value="month">This month</option>
-          <option value="quarter">Last 3 months</option>
+          <option value="7">This week</option>
+          <option value="30">This month</option>
+          <option value="90">Last 3 months</option>
         </select>
         <button class="btn secondary" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Show Hidden</button>
         <button class="btn secondary" onclick="loadScreener()">↻ Refresh</button>
@@ -3003,8 +3002,9 @@
   let screenerUpside = {}; // symbol -> upside %
   let lastVisitTime = parseInt(localStorage.getItem('screener_last_visit') || '0');
   let showHiddenScreener = false;
-  let screenerMarketCap = 'any';  // any | large | mid | small | micro
-  let screenerFreshness = 'any';  // any | week | month | quarter
+  // Size groups to show — unchecking a group hides those symbols. All on by default.
+  let screenerSizeFilter = { large: true, mid: true, small: true, micro: true, unknown: true };
+  let screenerDays = 7;  // server-side time window: 7 | 30 | 90 days
 
   // ── "Not Interested" — skip a symbol on Screener for a growing cooldown period
   function loadSkipped() {
@@ -3072,7 +3072,7 @@
     const list = document.getElementById('screenerList');
     list.innerHTML = `<div class="loading-card"><div class="spinner"></div> Loading analyst feed…</div>`;
     try {
-      const res = await fetch(`${SERVER_URL}/api/screener`, {
+      const res = await fetch(`${SERVER_URL}/api/screener?days=${screenerDays}`, {
         headers: { 'x-app-token': APP_TOKEN }
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -3123,29 +3123,21 @@
 
   function applyUpsideFilter() { renderScreener(); }
 
-  function setScreenerMarketCap(v) { screenerMarketCap = v; renderScreener(); }
-  function setScreenerFreshness(v) { screenerFreshness = v; renderScreener(); }
+  function setScreenerSizeFilter(key, value) { screenerSizeFilter[key] = value; renderScreener(); }
+  // Time window is filtered server-side — changing it refetches with the new days value.
+  function setScreenerFreshness(v) { screenerDays = parseInt(v, 10) || 7; loadScreener(); }
 
-  // Market-cap buckets (USD). Rows with no marketCap are never hidden — unknown ≠ excluded.
+  // Bucket each row by market cap (USD) and keep it only if that bucket is checked.
+  // Rows with no marketCap fall into the "unknown" bucket.
   function matchesMarketCap(item) {
-    if (screenerMarketCap === 'any') return true;
     const cap = item.upsideData?.marketCap;
-    if (cap === undefined || cap === null) return true; // show unknown
-    if (screenerMarketCap === 'large') return cap > 10e9;
-    if (screenerMarketCap === 'mid')   return cap >= 1e9  && cap <= 10e9;
-    if (screenerMarketCap === 'small') return cap >= 100e6 && cap < 1e9;
-    if (screenerMarketCap === 'micro') return cap < 100e6;
-    return true;
-  }
-
-  // Rating freshness by publishedDate. Rows with no/invalid date are hidden when a
-  // freshness filter is active (can't confirm they're recent).
-  function matchesFreshness(item) {
-    if (screenerFreshness === 'any') return true;
-    const t = item.publishedDate ? new Date(item.publishedDate).getTime() : NaN;
-    if (!Number.isFinite(t)) return false;
-    const days = { week: 7, month: 30, quarter: 90 }[screenerFreshness];
-    return t >= Date.now() - days * 24 * 60 * 60 * 1000;
+    let bucket;
+    if (cap === undefined || cap === null) bucket = 'unknown';
+    else if (cap > 10e9)   bucket = 'large';
+    else if (cap >= 1e9)   bucket = 'mid';
+    else if (cap >= 100e6) bucket = 'small';
+    else                   bucket = 'micro';
+    return screenerSizeFilter[bucket] !== false;
   }
 
   function renderScreener() {
@@ -3158,8 +3150,8 @@
     if (screenerFilter === 'init')      rows = rows.filter(r => r.action === 'initialise');
     if (screenerFilter === 'new')       rows = rows.filter(r => new Date(r.publishedDate).getTime() > lastVisitTime);
 
-    // Market-cap and rating-freshness dropdown filters
-    rows = rows.filter(matchesMarketCap).filter(matchesFreshness);
+    // Market-cap filter (time window is filtered server-side via ?days)
+    rows = rows.filter(matchesMarketCap);
 
     if (rows.length === 0) {
       list.innerHTML = `<div class="empty-state"><div class="big">🔍</div><p>No results for this filter.</p></div>`;
