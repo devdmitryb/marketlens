@@ -208,8 +208,10 @@ app.post('/api/admin/test-email', auth, requireAdmin, async (req, res) => {
 
 // Screener feed (cached, no FMP call)
 app.get('/api/screener', auth, async (req, res) => {
+  // Only allow a fixed set of windows — days is interpolated into a SQL interval.
+  const days = [7, 30, 90].includes(parseInt(req.query.days, 10)) ? parseInt(req.query.days, 10) : 7;
   try {
-    const data = await db.getScreener();
+    const data = await db.getScreener(days);
     res.json(data);
   } catch(e) {
     console.error('[db] getScreener failed, falling back to store:', e.message);
