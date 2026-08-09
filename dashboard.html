@@ -1614,9 +1614,9 @@
         </div>
         <select id="screenerFreshness" title="Filter by rating recency" onchange="setScreenerFreshness(this.value)"
           style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--sans);font-size:0.75rem;padding:7px 10px;border-radius:8px;outline:none;cursor:pointer">
-          <option value="7">This week</option>
-          <option value="30">This month</option>
-          <option value="90">Last 3 months</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
         </select>
         <button class="btn secondary" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Show Hidden</button>
         <button class="btn secondary" onclick="loadScreener()">↻ Refresh</button>
