@@ -374,6 +374,7 @@ async function enrichScreenerUpside() {
           upside: ((minTarget * 0.75 - quote.price) / quote.price * 100),
           price: quote.price,
           target: target.targetConsensus,
+          marketCap: quote.marketCap ?? null, // used by the Screener market-cap filter
           cachedAt: new Date().toISOString(),
         };
         try {
