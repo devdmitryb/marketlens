@@ -657,6 +657,10 @@
       padding: 28px 32px;
       width: 480px;
       max-width: 95vw;
+      /* Cap height and scroll internally so tall modals (e.g. the split Buy/Sell
+         forms on mobile) never push the action buttons off-screen */
+      max-height: 90vh;
+      overflow-y: auto;
       animation: fadeIn 0.2s ease;
     }
     .modal h3 {
@@ -734,7 +738,9 @@
       font-family: var(--sans); font-size: 0.75rem; resize: vertical; outline: none;
       white-space: normal;
     }
-    @media (max-width: 720px) {
+    /* On mobile, stack the split Buy/Sell modals into a single column
+       (info panel above the form) — matches the app's 768px mobile breakpoint */
+    @media (max-width: 768px) {
       .modal.modal-wide { width: 95vw; }
       .modal-split { grid-template-columns: 1fr; gap: 16px; }
     }
