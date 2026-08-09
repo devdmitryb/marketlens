@@ -355,9 +355,14 @@ async function addSignalLog(sym, newSignal, oldSignal, reason) {
 }
 
 // Screener
-async function getScreener() {
+async function getScreener(days = 7) {
+  // `days` is validated to a small allowlist by the caller before it reaches the
+  // interpolated interval. Cap rows at 10000 as a safety net against pathological windows.
   const res = await pool.query(
-    'SELECT data, upside_data FROM screener ORDER BY published_at DESC LIMIT 500'
+    `SELECT data, upside_data FROM screener
+     WHERE published_at >= NOW() - INTERVAL '${parseInt(days, 10)} days'
+     ORDER BY published_at DESC
+     LIMIT 10000`
   );
   return res.rows.map(r => ({ ...r.data, upsideData: r.upside_data }));
 }

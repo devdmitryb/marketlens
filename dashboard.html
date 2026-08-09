@@ -1614,10 +1614,9 @@
         </div>
         <select id="screenerFreshness" title="Filter by rating recency" onchange="setScreenerFreshness(this.value)"
           style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--sans);font-size:0.75rem;padding:7px 10px;border-radius:8px;outline:none;cursor:pointer">
-          <option value="any">Any time</option>
-          <option value="week">This week</option>
-          <option value="month">This month</option>
-          <option value="quarter">Last 3 months</option>
+          <option value="7">This week</option>
+          <option value="30">This month</option>
+          <option value="90">Last 3 months</option>
         </select>
         <button class="btn secondary" id="showHiddenBtn" onclick="toggleShowHidden()">👁 Show Hidden</button>
         <button class="btn secondary" onclick="loadScreener()">↻ Refresh</button>
@@ -3005,7 +3004,7 @@
   let showHiddenScreener = false;
   // Size groups to show — unchecking a group hides those symbols. All on by default.
   let screenerSizeFilter = { large: true, mid: true, small: true, micro: true, unknown: true };
-  let screenerFreshness = 'any';  // any | week | month | quarter
+  let screenerDays = 7;  // server-side time window: 7 | 30 | 90 days
 
   // ── "Not Interested" — skip a symbol on Screener for a growing cooldown period
   function loadSkipped() {
@@ -3073,7 +3072,7 @@
     const list = document.getElementById('screenerList');
     list.innerHTML = `<div class="loading-card"><div class="spinner"></div> Loading analyst feed…</div>`;
     try {
-      const res = await fetch(`${SERVER_URL}/api/screener`, {
+      const res = await fetch(`${SERVER_URL}/api/screener?days=${screenerDays}`, {
         headers: { 'x-app-token': APP_TOKEN }
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -3125,7 +3124,8 @@
   function applyUpsideFilter() { renderScreener(); }
 
   function setScreenerSizeFilter(key, value) { screenerSizeFilter[key] = value; renderScreener(); }
-  function setScreenerFreshness(v) { screenerFreshness = v; renderScreener(); }
+  // Time window is filtered server-side — changing it refetches with the new days value.
+  function setScreenerFreshness(v) { screenerDays = parseInt(v, 10) || 7; loadScreener(); }
 
   // Bucket each row by market cap (USD) and keep it only if that bucket is checked.
   // Rows with no marketCap fall into the "unknown" bucket.
@@ -3140,16 +3140,6 @@
     return screenerSizeFilter[bucket] !== false;
   }
 
-  // Rating freshness by publishedDate. Rows with no/invalid date are hidden when a
-  // freshness filter is active (can't confirm they're recent).
-  function matchesFreshness(item) {
-    if (screenerFreshness === 'any') return true;
-    const t = item.publishedDate ? new Date(item.publishedDate).getTime() : NaN;
-    if (!Number.isFinite(t)) return false;
-    const days = { week: 7, month: 30, quarter: 90 }[screenerFreshness];
-    return t >= Date.now() - days * 24 * 60 * 60 * 1000;
-  }
-
   function renderScreener() {
     const list = document.getElementById('screenerList');
     let rows = Array.isArray(screenerData) ? screenerData : [];
@@ -3160,8 +3150,8 @@
     if (screenerFilter === 'init')      rows = rows.filter(r => r.action === 'initialise');
     if (screenerFilter === 'new')       rows = rows.filter(r => new Date(r.publishedDate).getTime() > lastVisitTime);
 
-    // Market-cap and rating-freshness dropdown filters
-    rows = rows.filter(matchesMarketCap).filter(matchesFreshness);
+    // Market-cap filter (time window is filtered server-side via ?days)
+    rows = rows.filter(matchesMarketCap);
 
     if (rows.length === 0) {
       list.innerHTML = `<div class="empty-state"><div class="big">🔍</div><p>No results for this filter.</p></div>`;
