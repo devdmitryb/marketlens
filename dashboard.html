@@ -1684,7 +1684,7 @@
     <!-- Closed positions -->
     <div id="portfolio-closed" style="display:none">
       <div class="closed-header">
-        <div>Symbol</div><div>Entry</div><div>Exit</div><div>Entry $</div><div>Exit $</div><div>P&L</div><div>Days</div><div>Sell Note</div>
+        <div>Symbol</div><div>Entry</div><div>Exit</div><div>Entry $</div><div>Exit $</div><div>P&L</div><div>Days</div><div>Notes</div>
       </div>
       <div class="pos-table" id="closedPositionsTable">
         <div class="empty-state"><div class="big">📋</div><p>No closed positions yet.</p></div>
@@ -1882,7 +1882,7 @@
     <!-- Closed positions -->
     <div id="practice-closed" style="display:none">
       <div class="closed-header">
-        <div>Symbol</div><div>Entry</div><div>Exit</div><div>Entry $</div><div>Exit $</div><div>P&L</div><div>Days</div><div>Sell Note</div>
+        <div>Symbol</div><div>Entry</div><div>Exit</div><div>Entry $</div><div>Exit $</div><div>P&L</div><div>Days</div><div>Notes</div>
       </div>
       <div class="pos-table" id="practiceClosedTable">
         <div class="empty-state"><div class="big">📋</div><p>No closed practice positions yet.</p></div>
@@ -4464,7 +4464,10 @@
           <span style="font-size:0.7rem;opacity:0.8">${pos.pnlPct >= 0 ? '+' : ''}${pos.pnlPct.toFixed(2)}%</span>
         </div>
         <div style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">${pos.days}d</div>
-        <div style="font-size:0.75rem;color:var(--text-dim);white-space:normal;line-height:1.4">${escapeHtml(pos.sellNote || pos.exitSignal || reasonLabel[pos.reason] || pos.reason || '—')}</div>
+        <div style="font-size:0.75rem;color:var(--text-dim);white-space:normal;line-height:1.4">
+          <div>📝 Buy: ${escapeHtml(pos.note || '—')}</div>
+          <div>🏁 Sell: ${escapeHtml(pos.sellNote || pos.exitSignal || reasonLabel[pos.reason] || pos.reason || '—')}</div>
+        </div>
       `;
       tbl.appendChild(row);
     });
@@ -5511,7 +5514,10 @@
             <span style="font-size:0.7rem;opacity:0.8">${pos.pnlPct >= 0 ? '+' : ''}${pos.pnlPct.toFixed(1)}%</span>
           </div>
           <div style="font-family:var(--mono);font-size:0.75rem;color:var(--muted)">${pos.days}d</div>
-          <div style="font-size:0.75rem;color:var(--text-dim);white-space:normal;line-height:1.4">${escapeHtml(pos.sellNote || pos.exitSignal || reasonLabel[pos.reason] || pos.reason || '—')}</div>`;
+          <div style="font-size:0.75rem;color:var(--text-dim);white-space:normal;line-height:1.4">
+            <div>📝 Buy: ${escapeHtml(pos.note || '—')}</div>
+            <div>🏁 Sell: ${escapeHtml(pos.sellNote || pos.exitSignal || reasonLabel[pos.reason] || pos.reason || '—')}</div>
+          </div>`;
         closedTbl.appendChild(row);
       });
     }
