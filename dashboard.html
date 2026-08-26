@@ -1850,6 +1850,8 @@
       <div class="summary-card"><div class="s-label">Invested</div><div class="s-value" id="pr-invested">—</div></div>
       <div class="summary-card"><div class="s-label">Market Value</div><div class="s-value" id="pr-value">—</div></div>
       <div class="summary-card"><div class="s-label">Total P&L</div><div class="s-value" id="pr-pnl">—</div></div>
+      <div class="summary-card"><div class="s-label">Return on Capital</div><div class="s-value" id="pr-roc">—</div></div>
+      <div class="summary-card"><div class="s-label">Return on Invested</div><div class="s-value" id="pr-roi">—</div></div>
     </div>
 
     <!-- Tabs -->
@@ -5433,9 +5435,12 @@
       const cur    = livePracticePrices[pos.sym];
       if (cur) marketValue += cur * pos.shares;
     });
-    const totalPnl = (marketValue || 0) - invested + acc.closed.reduce((s, p) => s + p.netPnl, 0);
+    const closedPnl  = acc.closed.reduce((s, p) => s + p.netPnl, 0);
+    const totalPnl   = (marketValue || 0) - invested + closedPnl;
+    const closedCost = acc.closed.reduce((s, p) => s + (p.entryPrice * p.shares + p.entryComm), 0);
 
     const fmt = v => v >= 0 ? `+$${v.toFixed(2)}` : `-$${Math.abs(v).toFixed(2)}`;
+    const fmtPct = v => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
     document.getElementById('pr-cash').textContent     = `$${acc.cash.toFixed(2)}`;
     document.getElementById('pr-invested').textContent = `$${invested.toFixed(2)}`;
     document.getElementById('pr-value').textContent    = marketValue ? `$${marketValue.toFixed(2)}` : '—';
@@ -5444,6 +5449,20 @@
       pnlEl.textContent = fmt(totalPnl);
       pnlEl.className = 's-value ' + (totalPnl >= 0 ? 'up' : 'down');
     } else { pnlEl.textContent = '—'; }
+
+    const rocEl = document.getElementById('pr-roc');
+    if (acc.capital) {
+      const returnOnCapital = totalPnl / acc.capital * 100;
+      rocEl.textContent = `${fmtPct(returnOnCapital)} on capital`;
+      rocEl.className = 's-value ' + (returnOnCapital >= 0 ? 'up' : 'down');
+    } else { rocEl.textContent = '—'; rocEl.className = 's-value'; }
+
+    const roiEl = document.getElementById('pr-roi');
+    if (closedCost) {
+      const returnOnInvested = closedPnl / closedCost * 100;
+      roiEl.textContent = `${fmtPct(returnOnInvested)} on invested`;
+      roiEl.className = 's-value ' + (returnOnInvested >= 0 ? 'up' : 'down');
+    } else { roiEl.textContent = '—'; roiEl.className = 's-value'; }
 
     // Open positions
     const openTbl = document.getElementById('practiceOpenTable');
