@@ -614,6 +614,9 @@
     .pos-note   { font-size: 0.75rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pos-days   { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
 
+    .closed-sym-link { cursor: pointer; color: var(--accent2); }
+    .closed-sym-link:hover { text-decoration: underline; }
+
     /* closed row */
     .closed-header {
       padding: 6px 20px;
@@ -4454,7 +4457,7 @@
       row.onclick = () => openDrawer(pos.sym);
       const pnlColor = pos.netPnl >= 0 ? 'var(--accent2)' : 'var(--danger)';
       row.innerHTML = `
-        <div class="pos-sym">${pos.sym}</div>
+        <div class="pos-sym closed-sym-link" onclick="openDrawer('${pos.sym}')">${pos.sym}</div>
         <div style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim)">${pos.date}</div>
         <div style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim)">${pos.exitDate}</div>
         <div style="font-family:var(--mono);font-size:0.82rem">$${pos.entryPrice.toFixed(2)}</div>
@@ -5504,7 +5507,7 @@
         row.style.animationDelay = `${i*0.04}s`;
         const color = pos.netPnl >= 0 ? 'var(--accent2)' : 'var(--danger)';
         row.innerHTML = `
-          <div class="pos-sym">${pos.sym}</div>
+          <div class="pos-sym closed-sym-link" onclick="openDrawer('${pos.sym}')">${pos.sym}</div>
           <div style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim)">${pos.date}</div>
           <div style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim)">${pos.exitDate}</div>
           <div style="font-family:var(--mono);font-size:0.82rem">$${pos.entryPrice.toFixed(2)}</div>
