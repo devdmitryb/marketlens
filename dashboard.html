@@ -2436,7 +2436,13 @@
   }
 
   function saveWatchlist() {
-    localStorage.setItem('watchlist', JSON.stringify(watchlist));
+    // Watchlist lives in PostgreSQL (synced via syncToServer). Only fall back
+    // to localStorage when the server is unreachable, so we don't blow the
+    // localStorage quota by mirroring data that's already persisted server-side.
+    if (!serverAvailable) {
+      try { localStorage.setItem('watchlist', JSON.stringify(watchlist)); }
+      catch(e) { console.warn('watchlist cache write failed:', e.message); }
+    }
     syncToServer();
   }
 
@@ -4135,10 +4141,14 @@
   let livePortfolioPrices = {}; // symbol -> current price
 
   function savePortfolio() {
-    // portfolio_closed grows unboundedly and is already the source of truth in
-    // Postgres via syncToServer() below — don't keep a full copy in localStorage
-    try { localStorage.setItem('portfolio_open', JSON.stringify(openPositions)); }
-    catch(e) { console.warn('portfolio_open cache write failed:', e.message); }
+    // Portfolio lives in PostgreSQL (synced via syncToServer). Only fall back
+    // to localStorage when the server is unreachable, so we don't blow the
+    // localStorage quota by mirroring data that's already persisted server-side.
+    // portfolio_closed grows unboundedly, so it's never cached — always cleared.
+    if (!serverAvailable) {
+      try { localStorage.setItem('portfolio_open', JSON.stringify(openPositions)); }
+      catch(e) { console.warn('portfolio_open cache write failed:', e.message); }
+    }
     try { localStorage.removeItem('portfolio_closed'); } catch(e) {}
     syncToServer();
   }
@@ -4708,7 +4718,13 @@
   function saveSignalLog() {
     // Keep max 200 entries
     if (signalLog.length > 200) signalLog = signalLog.slice(0, 200);
-    localStorage.setItem('signal_log', JSON.stringify(signalLog));
+    // Signal log lives in PostgreSQL (populated by the server cron job) and is
+    // fetched fresh on load. Only fall back to localStorage when the server is
+    // unreachable, so we don't blow the localStorage quota mirroring it here.
+    if (!serverAvailable) {
+      try { localStorage.setItem('signal_log', JSON.stringify(signalLog)); }
+      catch(e) { console.warn('signal_log cache write failed:', e.message); }
+    }
   }
 
   function logSignalChange(sym, newSignal, oldSignal, reason, source) {
@@ -4764,7 +4780,7 @@
     if (!confirm('Clear all signal history?')) return;
     signalLog = [];
     prevSignals = {};
-    localStorage.setItem('signal_log', '[]');
+    if (!serverAvailable) localStorage.setItem('signal_log', '[]');
     localStorage.setItem('prev_signals', '{}');
     updateSlogBadge();
     renderSlog();
@@ -4848,8 +4864,13 @@
   }
 
   function savePracticeAccounts() {
-    try { localStorage.setItem('practice_accounts', JSON.stringify(practiceAccountsLite(practiceAccounts))); }
-    catch(e) { console.warn('practice_accounts cache write failed:', e.message); }
+    // Practice accounts live in PostgreSQL (synced via syncToServer). Only
+    // fall back to localStorage when the server is unreachable, so we don't
+    // blow the localStorage quota mirroring data already persisted server-side.
+    if (!serverAvailable) {
+      try { localStorage.setItem('practice_accounts', JSON.stringify(practiceAccountsLite(practiceAccounts))); }
+      catch(e) { console.warn('practice_accounts cache write failed:', e.message); }
+    }
     syncToServer();
   }
 
@@ -6331,15 +6352,30 @@
           const serverWatchlist = await wlRes.json();
           if (serverWatchlist.length > 0) {
             watchlist = serverWatchlist;
-            localStorage.setItem('watchlist', JSON.stringify(watchlist));
           }
         }
         if (prRes.ok) {
           const serverPractice = await prRes.json();
           if (Array.isArray(serverPractice) && serverPractice.length > 0) {
             practiceAccounts = serverPractice;
-            try { localStorage.setItem('practice_accounts', JSON.stringify(practiceAccountsLite(practiceAccounts))); }
-            catch(e) { console.warn('practice_accounts cache write failed:', e.message); }
+          }
+        }
+        // Load signal log from server (source of truth is PostgreSQL, not localStorage)
+        const slogRes = await fetch(`${SERVER_URL}/api/signal-log`, { headers: { 'x-app-token': APP_TOKEN } });
+        if (slogRes.ok) {
+          const serverSlog = await slogRes.json();
+          if (Array.isArray(serverSlog)) {
+            signalLog = serverSlog.map(e => ({
+              id:        e.id,
+              ts:        e.created_at,
+              sym:       e.symbol,
+              newSignal: e.new_signal,
+              oldSignal: e.old_signal,
+              reason:    e.reason,
+              source:    e.source || 'server',
+            }));
+            updateSlogBadge();
+            renderSlog();
           }
         }
         // Load portfolio from server
@@ -6349,8 +6385,6 @@
           if (serverPort?.open?.length > 0 || serverPort?.closed?.length > 0) {
             openPositions   = serverPort.open   || [];
             closedPositions = serverPort.closed || [];
-            try { localStorage.setItem('portfolio_open', JSON.stringify(openPositions)); }
-            catch(e) { console.warn('portfolio_open cache write failed:', e.message); }
             try { localStorage.removeItem('portfolio_closed'); } catch(e) {}
           }
         }
