@@ -3303,8 +3303,10 @@
       lastVolSignalType = null;
       return `<div style="color:var(--muted);font-size:0.75rem">Loading chart data…</div>`;
     }
-    const recent = hist.slice(-6);
-    const last5  = recent.slice(-5);
+    // Sort by date descending so "last 5" always means the most recent 5 calendar
+    // days, regardless of the array's incoming order or which chart period it came from
+    const sorted = [...hist].sort((a, b) => parseHistoryDate(b.date) - parseHistoryDate(a.date));
+    const last5  = sorted.slice(0, 5).reverse(); // back to chronological order for the comparison below
     const avgVol  = last5.slice(0,4).reduce((s,d) => s + (d.volume||0), 0) / 4;
     const todayVol = last5[last5.length-1]?.volume || 0;
     const priceDir = last5[last5.length-1]?.close > last5[last5.length-2]?.close ? 'up' : 'down';
