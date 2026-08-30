@@ -55,6 +55,10 @@ async function initSchema() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      ALTER TABLE signals ADD COLUMN IF NOT EXISTS volume_signal TEXT;
+      ALTER TABLE signals ADD COLUMN IF NOT EXISTS combined_signal TEXT;
+      ALTER TABLE signals ADD COLUMN IF NOT EXISTS analyst_accuracy JSONB;
+
       CREATE TABLE IF NOT EXISTS signal_log (
         id         SERIAL PRIMARY KEY,
         symbol     TEXT NOT NULL,
@@ -311,17 +315,32 @@ async function touchLastActive(id) {
 
 // Signals
 async function getSignals() {
-  const res = await pool.query('SELECT symbol, data FROM signals');
+  const res = await pool.query('SELECT symbol, data, volume_signal, combined_signal, analyst_accuracy FROM signals');
   const out = {};
-  res.rows.forEach(r => { out[r.symbol] = r.data; });
+  res.rows.forEach(r => {
+    out[r.symbol] = {
+      ...r.data,
+      volumeSignal: r.volume_signal,
+      combinedSignal: r.combined_signal,
+      analystAccuracy: r.analyst_accuracy,
+    };
+  });
   return out;
 }
 
-async function saveSignal(symbol, data) {
+// `extra` carries the Analysis View metrics that live in their own columns
+// rather than inside the `data` JSONB blob:
+//   volumeSignal    — TEXT, e.g. 'Confirmed move' | 'Selling pressure' | ...
+//   combinedSignal  — TEXT, e.g. 'Strong Entry' | 'Wait for Volume' | 'Strong Exit'
+//   analystAccuracy — array of { grade_type, price_at_rating, current_price, correct }
+async function saveSignal(symbol, data, extra = {}) {
+  const { volumeSignal = null, combinedSignal = null, analystAccuracy = null } = extra;
   await pool.query(`
-    INSERT INTO signals (symbol, data, updated_at) VALUES ($1, $2, NOW())
-    ON CONFLICT (symbol) DO UPDATE SET data = $2, updated_at = NOW()
-  `, [symbol, JSON.stringify(data)]);
+    INSERT INTO signals (symbol, data, volume_signal, combined_signal, analyst_accuracy, updated_at)
+    VALUES ($1, $2, $3, $4, $5, NOW())
+    ON CONFLICT (symbol) DO UPDATE SET
+      data = $2, volume_signal = $3, combined_signal = $4, analyst_accuracy = $5, updated_at = NOW()
+  `, [symbol, JSON.stringify(data), volumeSignal, combinedSignal, analystAccuracy ? JSON.stringify(analystAccuracy) : null]);
 }
 
 // Signal log
