@@ -13,6 +13,14 @@ function calcConservativeUpside(target, price) {
   return (minTarget * 0.75 - price) / price;
 }
 
+// Classify a single grade's newGrade text as 'buy' | 'sell' | 'hold'.
+function classifyGrade(newGrade) {
+  const gr = (newGrade || '').toLowerCase();
+  if (/buy|outperform|overweight|strong buy|accumulate/.test(gr)) return 'buy';
+  if (/sell|underperform|underweight|reduce/.test(gr)) return 'sell';
+  return 'hold';
+}
+
 // Build a { buy, hold, sell } tally from analyst grades within the last `windowDays`.
 function tallyGrades(grades, windowDays = 90) {
   const cutoff = new Date();
@@ -20,10 +28,7 @@ function tallyGrades(grades, windowDays = 90) {
   const tally = { buy: 0, hold: 0, sell: 0 };
   (grades || []).forEach(g => {
     if (new Date(g.date) < cutoff) return;
-    const gr = (g.newGrade || '').toLowerCase();
-    if (/buy|outperform|overweight|strong buy|accumulate/.test(gr)) tally.buy++;
-    else if (/sell|underperform|underweight|reduce/.test(gr)) tally.sell++;
-    else tally.hold++;
+    tally[classifyGrade(g.newGrade)]++;
   });
   return tally;
 }
@@ -197,4 +202,68 @@ function calcSignal(data) {
   };
 }
 
-module.exports = { calcConservativeUpside, tallyGrades, calcMomentum, calcSignal };
+// Volume Signal — classifies the most recent day's price+volume move using the
+// last 5 days of price history. Mirrors dashboard.html's computeVolSignalHTML
+// (drawer "Volume Signal" section). Independent of calcMomentum's 20d/3d
+// volSurge check, which feeds the main signal's timing logic instead.
+function calcVolumeSignal(history) {
+  if (!history || history.length < 5) return null;
+
+  const sorted = [...history].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const last5  = sorted.slice(0, 5).reverse(); // chronological order, most recent day last
+
+  const avgVol   = last5.slice(0, 4).reduce((s, d) => s + (parseInt(d.volume) || 0), 0) / 4;
+  const todayVol = parseInt(last5[4].volume) || 0;
+  const priceDir = parseFloat(last5[4].close) > parseFloat(last5[3].close) ? 'up' : 'down';
+  const volDir   = todayVol > avgVol ? 'up' : 'down';
+
+  if (priceDir === 'up'   && volDir === 'up')   return 'confirmed';
+  if (priceDir === 'down' && volDir === 'down') return 'pullback';
+  if (priceDir === 'up'   && volDir === 'down') return 'weak';
+  return 'selling'; // priceDir === 'down' && volDir === 'up'
+}
+
+// Combined Signal — pairs the main momentum+analyst signal with the Volume
+// Signal into one of 3 defined high-conviction combos; null otherwise.
+function calcCombinedSignal(signal, volumeSignal) {
+  if (signal === 'BUY — CONFIRMED' && volumeSignal === 'confirmed') return 'strong_entry';
+  if (signal === 'BUY — CONFIRMED' && volumeSignal === 'weak') return 'wait_volume';
+  if (['SELL — REVERSAL', 'TRIM', 'SELL'].includes(signal) && volumeSignal === 'selling') return 'strong_exit';
+  return null;
+}
+
+// Analyst Accuracy — last 5 non-Hold grades, each graded correct/incorrect by
+// comparing the price at rating time (looked up in already-fetched price
+// history) against the current price. A grade whose date falls outside the
+// supplied history window (no matching row) is skipped rather than guessed at.
+function calcAnalystAccuracy(grades, history, currentPrice) {
+  if (!grades || !grades.length || currentPrice == null || !history || !history.length) return [];
+
+  const sortedHistory = [...history].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const findPriceOnOrAfter = (dateStr) => {
+    const row = sortedHistory.find(h => h.date >= dateStr);
+    return row ? parseFloat(row.close) : null;
+  };
+
+  const candidates = grades
+    .map(g => ({ date: String(g.date).slice(0, 10), gradeType: classifyGrade(g.newGrade) }))
+    .filter(g => g.gradeType === 'buy' || g.gradeType === 'sell')
+    .sort((a, b) => (a.date < b.date ? 1 : -1)) // most recent first
+    .slice(0, 5);
+
+  const results = [];
+  for (const g of candidates) {
+    const priceAtRating = findPriceOnOrAfter(g.date);
+    if (priceAtRating == null) continue;
+    const correct = g.gradeType === 'buy'
+      ? currentPrice > priceAtRating
+      : currentPrice < priceAtRating;
+    results.push({ gradeType: g.gradeType, priceAtRating, currentPrice, correct });
+  }
+  return results;
+}
+
+module.exports = {
+  calcConservativeUpside, tallyGrades, calcMomentum, calcSignal,
+  calcVolumeSignal, calcCombinedSignal, calcAnalystAccuracy,
+};
