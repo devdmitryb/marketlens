@@ -3291,6 +3291,9 @@
   //  PRICE CHART
   // ══════════════════════════════════════════
   let chartCache = {}; // sym_days -> historical data
+  // Independent 30-day history for the Volume Signal section, decoupled from chartCache
+  // so the signal never changes depending on which chart period (1M/3M/6M/1Y) is selected
+  let volSignalCache = {}; // sym -> fixed 30-day historical data
   // Set as a side effect of computeVolSignalHTML() — one of 'confirmed' | 'pullback' | 'weak' | 'selling' | null.
   // Read by renderCombinedSignalHTML() so the Combined Signal section stays in sync
   // with whatever window the Volume Signal section last computed.
@@ -3384,6 +3387,51 @@
     return ageDays <= 1;
   }
 
+  // Fetches a fixed 30-day history window for the Volume Signal section, always,
+  // regardless of which chart period is currently selected — cached separately
+  // from chartCache (see volSignalCache above) so period switches never touch it.
+  async function fetchVolSignalHistory(sym) {
+    let history = volSignalCache[sym];
+    if (history && !isChartDataFresh(history)) history = null;
+
+    if (!history) {
+      const cached = cacheGet(`volhist_${sym}`, 'target');
+      if (cached && isChartDataFresh(cached)) {
+        history = cached;
+        volSignalCache[sym] = history; // warm in-memory cache too
+      }
+    }
+
+    if (!history) {
+      try {
+        const from    = new Date(); from.setDate(from.getDate() - 30);
+        const fromStr = from.toISOString().slice(0, 10);
+        const res = await fetch(`${SERVER_URL}/api/history/${sym}?from=${fromStr}`, {
+          headers: { 'x-app-token': APP_TOKEN }
+        });
+        const data = await res.json();
+        // PostgreSQL returns NUMERIC columns as strings — normalize to real numbers
+        // before anything renders or caches this data
+        history = (Array.isArray(data) ? data : []).map(d => ({
+          ...d,
+          close:  parseFloat(d.close),
+          open:   parseFloat(d.open),
+          high:   parseFloat(d.high),
+          low:    parseFloat(d.low),
+          volume: parseInt(d.volume) || 0,
+        }));
+        if (history.length) {
+          volSignalCache[sym] = history;
+          cacheSet(`volhist_${sym}`, history);
+        }
+      } catch(e) {
+        return [];
+      }
+    }
+
+    return history || [];
+  }
+
   async function loadChart(sym, days, btnEl) {
     // Update active button
     if (btnEl) {
@@ -3446,17 +3494,6 @@
     }
 
     renderChart(wrap, history, sym);
-
-    // Re-render volume signal section now that chart data is available
-    const volSignalEl = document.getElementById('drawerVolSignal');
-    if (volSignalEl) {
-      volSignalEl.innerHTML = computeVolSignalHTML(history);
-    }
-    // Combined Signal depends on the volume signal type computed above — refresh it too
-    const combinedSignalEl = document.getElementById('drawerCombinedSignal');
-    if (combinedSignalEl) {
-      combinedSignalEl.innerHTML = renderCombinedSignalHTML(currentDrawerSignal, lastVolSignalType);
-    }
   }
 
   function renderChart(wrap, history, sym) {
@@ -3780,11 +3817,12 @@
   async function loadDrawerData(sym) {
     try {
       const headers = { 'x-app-token': APP_TOKEN };
-      let [quote, grades, target, earnings] = await Promise.all([
+      let [quote, grades, target, earnings, volHistory] = await Promise.all([
         fetch(`${SERVER_URL}/api/quote/${sym}`,    { headers }).then(r => r.json()).catch(() => null),
         fetch(`${SERVER_URL}/api/grades/${sym}`,   { headers }).then(r => r.json()).catch(() => []),
         fetch(`${SERVER_URL}/api/target/${sym}`,   { headers }).then(r => r.json()).catch(() => null),
         fetch(`${SERVER_URL}/api/earnings/${sym}`, { headers }).then(r => r.json()).catch(() => []),
+        fetchVolSignalHistory(sym),
       ]);
       // Normalize
       if (Array.isArray(quote))    quote    = quote[0]   || null;
@@ -3798,11 +3836,6 @@
       const lastEarnings = earnings.find(e => e.epsActual !== null);
 
       if (quote?.name) document.getElementById('drawerName').textContent = quote.name;
-
-      // Auto-load 30d chart for Volume Signal (if not cached)
-      if (!chartCache[`${sym}_30`]) {
-        loadChart(sym, 30).catch(() => {});
-      }
 
       // tally last 90 days
       const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 90);
@@ -3824,9 +3857,11 @@
       const { signal, reason } = calcSignal(data);
       currentDrawerSignal = signal;
 
-      // Compute Volume Signal once here so both the Volume Signal section and
-      // Combined Signal section (which needs lastVolSignalType) use the same result
-      const volSignalHtml = computeVolSignalHTML(chartCache[`${sym}_30`] || chartCache[`${sym}_90`] || chartCache[`${sym}_180`]);
+      // Compute Volume Signal once here, from the independent 30-day history fetched
+      // above, so both the Volume Signal section and the Combined Signal section
+      // (which needs lastVolSignalType) use the same result and stay unaffected by
+      // whatever chart period the user later selects
+      const volSignalHtml = computeVolSignalHTML(volHistory);
       const combinedSignalHtml = renderCombinedSignalHTML(signal, lastVolSignalType);
 
       // upside calc — conservative: (min analyst target × 0.75 - price) / price
