@@ -3,7 +3,7 @@ const cron  = require('node-cron');
 const fmp   = require('./fmp');
 const store = require('./store');
 const db    = require('./db');
-const { calcMomentum, calcSignal, tallyGrades } = require('./signals');
+const { calcMomentum, calcSignal, tallyGrades, calcVolumeSignal, calcCombinedSignal, calcAnalystAccuracy } = require('./signals');
 
 // Delay between individual FMP calls within a single symbol's refresh (avoid 429s)
 const FMP_DELAY = 800;
@@ -281,6 +281,12 @@ async function refreshSymbol(sym, holdings) {
     ? ((target.targetConsensus - quote.price) / quote.price * 100)
     : null;
 
+  // Analysis View metrics — Volume Signal, Combined Signal, Analyst Accuracy.
+  // Reuse the same `history`/`grades` already fetched above; no extra FMP calls.
+  const volumeSignal    = calcVolumeSignal(history);
+  const combinedSignal  = calcCombinedSignal(newSignal, volumeSignal);
+  const analystAccuracy = calcAnalystAccuracy(grades || [], history, quote?.price);
+
   // 6. Previous signal for change detection
   let prevSignal = null;
   try {
@@ -302,11 +308,11 @@ async function refreshSymbol(sym, holdings) {
     updatedAt: new Date().toISOString(),
   };
   try {
-    await db.saveSignal(sym, signalData);
+    await db.saveSignal(sym, signalData, { volumeSignal, combinedSignal, analystAccuracy });
   } catch(e) {
     console.error(`[db] saveSignal failed for ${sym}, falling back to store:`, e.message);
     const storeSignals = store.read('signals', {});
-    storeSignals[sym] = signalData;
+    storeSignals[sym] = { ...signalData, volumeSignal, combinedSignal, analystAccuracy };
     store.write('signals', storeSignals);
   }
 
