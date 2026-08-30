@@ -5061,7 +5061,7 @@
     const data = stockData[sym];
     let priceHtml = currentPrice ? `$${Number(currentPrice).toFixed(2)}` : '—';
     let signalHtml = `<span style="color:var(--muted);font-size:0.72rem">No signal data yet</span>`;
-    let upsideHtml = '—', consensusHtml = '—';
+    let upsideHtml = '—', consensusHtml = '—', marketCapHtml = '—';
     let tallyHtml  = `<span style="color:var(--muted)">—</span>`;
     // lastVolSignalType is only meaningful for the symbol whose drawer produced it
     let volHtml    = (currentDrawerSym === sym && VOL_SIGNAL_LABELS[lastVolSignalType]) || '—';
@@ -5078,6 +5078,13 @@
       }
       const cons = data.target?.targetConsensus;
       if (cons) consensusHtml = `$${cons.toFixed(2)}`;
+      const mc = data.quote?.marketCap;
+      if (mc) {
+        marketCapHtml = mc >= 1e12 ? '$' + (mc/1e12).toFixed(1) + 'T'
+          : mc >= 1e9 ? '$' + (mc/1e9).toFixed(1) + 'B'
+          : mc >= 1e6 ? '$' + (mc/1e6).toFixed(0) + 'M'
+          : '$' + mc.toLocaleString();
+      }
       const t = data.tally || { buy:0, hold:0, sell:0 };
       if (t.buy + t.hold + t.sell > 0) {
         tallyHtml = `<span class="up">${t.buy}</span> · <span style="color:var(--accent)">${t.hold}</span> · <span class="down">${t.sell}</span>`;
@@ -5091,6 +5098,7 @@
       <div class="mi-list">
         <div class="mi-row"><span>Cons. Upside</span><span>${upsideHtml}</span></div>
         <div class="mi-row"><span>Analyst Target</span><span>${consensusHtml}</span></div>
+        <div class="mi-row"><span>Market Cap</span><span>${marketCapHtml}</span></div>
         <div class="mi-row"><span>Analysts (B·H·S)</span><span>${tallyHtml}</span></div>
         <div class="mi-row"><span>Volume Signal</span><span>${volHtml}</span></div>
       </div>
