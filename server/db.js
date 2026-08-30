@@ -328,6 +328,21 @@ async function getSignals() {
   return out;
 }
 
+async function getSignal(symbol) {
+  const res = await pool.query(
+    'SELECT symbol, data, volume_signal, combined_signal, analyst_accuracy FROM signals WHERE symbol = $1',
+    [symbol]
+  );
+  const r = res.rows[0];
+  if (!r) return null;
+  return {
+    ...r.data,
+    volumeSignal: r.volume_signal,
+    combinedSignal: r.combined_signal,
+    analystAccuracy: r.analyst_accuracy,
+  };
+}
+
 // `extra` carries the Analysis View metrics that live in their own columns
 // rather than inside the `data` JSONB blob:
 //   volumeSignal    — TEXT, e.g. 'Confirmed move' | 'Selling pressure' | ...
@@ -507,7 +522,7 @@ module.exports = {
   getPractice,  savePractice,
   getUserByUsername, getUserById, getUsers,
   createUser, deleteUser, updateUserPassword, touchLastActive,
-  getSignals,   saveSignal,
+  getSignals,   saveSignal, getSignal,
   getSignalLog, addSignalLog,
   getScreener,  saveScreenerEntry, updateScreenerUpside,
   getCachedQuote,  setCachedQuote,
