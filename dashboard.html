@@ -335,6 +335,41 @@
     .signal-sell-reversal { background: rgba(255,77,109,0.2); color: var(--danger); border: 2px solid var(--danger); font-weight: 700; }
     .signal-wait      { background: rgba(74,74,106,0.2); color: var(--muted); border: 1px solid var(--border); }
 
+    /* ── ANALYSIS VIEW ── */
+    .analysis-header {
+      padding: 6px 20px;
+      display: grid;
+      grid-template-columns: 80px 150px 150px 90px 130px 100px 90px 1fr;
+      gap: 14px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .analysis-table {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .analysis-row {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 20px;
+      display: grid;
+      grid-template-columns: 80px 150px 150px 90px 130px 100px 90px 1fr;
+      align-items: center;
+      gap: 14px;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      transition: border-color 0.2s, transform 0.15s;
+      animation: fadeIn 0.3s ease both;
+    }
+    .analysis-row:hover { border-color: var(--muted); transform: translateX(2px); }
+    .analysis-row .signal { display: inline-block; }
+    .analysis-row .accuracy-icons span { margin-right: 2px; }
+
     .remove-btn {
       background: none;
       border: none;
@@ -1562,15 +1597,21 @@
     <!-- Table -->
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
       <div class="section-title" style="margin-bottom:0">Watchlist</div>
-      <div class="filter-group" id="watchlistFilters">
-        <button class="filter-btn active-all" id="wf-all"       onclick="setWatchFilter('all')">All</button>
-        <button class="filter-btn"            id="wf-confirmed" onclick="setWatchFilter('confirmed')">🟢 Buy Confirmed</button>
-        <button class="filter-btn"            id="wf-watch"     onclick="setWatchFilter('watch')">🟡 Watch</button>
-        <button class="filter-btn"            id="wf-action"    onclick="setWatchFilter('action')">🔴 Action Needed</button>
-        <button class="filter-btn"            id="wf-wait"      onclick="setWatchFilter('wait')">⏳ Wait</button>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="portfolio-tabs" id="watchlistViewToggle" style="margin-bottom:0">
+          <button class="ptab active" id="wv-list"     onclick="setWatchlistView('list')">📋 List</button>
+          <button class="ptab"        id="wv-analysis" onclick="setWatchlistView('analysis')">📊 Analysis</button>
+        </div>
+        <div class="filter-group" id="watchlistFilters">
+          <button class="filter-btn active-all" id="wf-all"       onclick="setWatchFilter('all')">All</button>
+          <button class="filter-btn"            id="wf-confirmed" onclick="setWatchFilter('confirmed')">🟢 Buy Confirmed</button>
+          <button class="filter-btn"            id="wf-watch"     onclick="setWatchFilter('watch')">🟡 Watch</button>
+          <button class="filter-btn"            id="wf-action"    onclick="setWatchFilter('action')">🔴 Action Needed</button>
+          <button class="filter-btn"            id="wf-wait"      onclick="setWatchFilter('wait')">⏳ Wait</button>
+        </div>
       </div>
     </div>
-    <div class="stock-header-row">
+    <div class="stock-header-row" id="watchlistListHeader">
       <div></div>
       <div>Symbol</div>
       <div>Price</div>
@@ -1585,6 +1626,18 @@
         Make sure your API key is saved, then try <code>AAPL</code> or <code>NVDA</code>.</p>
       </div>
     </div>
+
+    <div class="analysis-header" id="watchlistAnalysisHeader" style="display:none">
+      <div>Symbol</div>
+      <div>Signal</div>
+      <div>Combined</div>
+      <div>Upside %</div>
+      <div>Accuracy</div>
+      <div>Market Cap</div>
+      <div>Analysts</div>
+      <div>Volume Signal</div>
+    </div>
+    <div class="analysis-table" id="watchlistAnalysisTable" style="display:none"></div>
 
   </div>
 
@@ -2391,6 +2444,23 @@
   }
 
   // ══════════════════════════════════════════
+  //  WATCHLIST VIEW TOGGLE (List / Analysis)
+  // ══════════════════════════════════════════
+  let watchlistView = localStorage.getItem('watchlistView') === 'analysis' ? 'analysis' : 'list';
+
+  function setWatchlistView(view) {
+    watchlistView = view;
+    localStorage.setItem('watchlistView', view);
+    document.getElementById('wv-list').classList.toggle('active', view === 'list');
+    document.getElementById('wv-analysis').classList.toggle('active', view === 'analysis');
+    document.getElementById('watchlistListHeader').style.display = view === 'list' ? 'grid' : 'none';
+    document.getElementById('stocksGrid').style.display = view === 'list' ? '' : 'none';
+    document.getElementById('watchlistAnalysisHeader').style.display = view === 'analysis' ? 'grid' : 'none';
+    document.getElementById('watchlistAnalysisTable').style.display = view === 'analysis' ? '' : 'none';
+    renderAll();
+  }
+
+  // ══════════════════════════════════════════
   //  WATCHLIST FILTER
   // ══════════════════════════════════════════
   let watchFilter = 'all';
@@ -2673,6 +2743,9 @@
           quote, target, tally,
           momentum: null,
           serverSignal: sig ? { signal: sig.signal, reason: sig.reason } : null,
+          combinedSignal:  sig?.combinedSignal  ?? null,
+          volumeSignal:    sig?.volumeSignal    ?? null,
+          analystAccuracy: sig?.analystAccuracy ?? null,
         };
       });
 
@@ -2878,6 +2951,10 @@
   //  RENDER
   // ══════════════════════════════════════════
   function renderAll() {
+    if (watchlistView === 'analysis') {
+      renderWatchlistAnalysisTable();
+      return;
+    }
     const grid = document.getElementById('stocksGrid');
     if (watchlist.length === 0) {
       grid.innerHTML = `<div class="empty-state">
@@ -2907,6 +2984,110 @@
         <button class="btn secondary" style="margin-top:12px" onclick="setWatchFilter('all')">Show All</button></p>
       </div>`;
     }
+  }
+
+  // ── Analysis View: one compact row per symbol, sourced entirely from
+  // stockData (itself populated from /api/signals) — no extra FMP calls.
+  function renderWatchlistAnalysisTable() {
+    const container = document.getElementById('watchlistAnalysisTable');
+    if (!container) return;
+    if (watchlist.length === 0) {
+      container.innerHTML = `<div class="empty-state">
+        <div class="big">📡</div>
+        <p>Add a symbol above to start tracking.<br/>
+        Make sure your API key is saved, then try <code>AAPL</code> or <code>NVDA</code>.</p>
+      </div>`;
+      return;
+    }
+    container.innerHTML = '';
+    let shown = 0;
+    watchlist.forEach(sym => {
+      const data = stockData[sym];
+      if (!data) return;
+      if (watchFilter !== 'all') {
+        const { signal } = calcSignal(data);
+        if (!signalMatchesFilter(signal, watchFilter)) return;
+      }
+      container.appendChild(buildAnalysisRow(sym, data));
+      shown++;
+    });
+    if (shown === 0) {
+      container.innerHTML = `<div class="empty-state">
+        <div class="big">🔍</div>
+        <p>No symbols match this filter right now.<br/>
+        <button class="btn secondary" style="margin-top:12px" onclick="setWatchFilter('all')">Show All</button></p>
+      </div>`;
+    }
+  }
+
+  const COMBINED_SIGNAL_LABELS = {
+    strong_entry: { icon: '⭐', text: 'Strong Entry' },
+    wait_volume:  { icon: '⚠️', text: 'Wait for Volume' },
+    strong_exit:  { icon: '🔴', text: 'Strong Exit' },
+  };
+  const VOLUME_SIGNAL_LABELS = {
+    confirmed: { icon: '✅', text: 'Confirmed move' },
+    pullback:  { icon: '🟡', text: 'Normal pullback' },
+    weak:      { icon: '⚠️', text: 'Weak move' },
+    selling:   { icon: '🔴', text: 'Selling pressure' },
+  };
+
+  function formatMarketCap(mc) {
+    if (!mc) return '—';
+    if (mc >= 1e12) return '$' + (mc / 1e12).toFixed(1) + 'T';
+    if (mc >= 1e9)  return '$' + (mc / 1e9).toFixed(1)  + 'B';
+    if (mc >= 1e6)  return '$' + (mc / 1e6).toFixed(0)  + 'M';
+    return '$' + mc.toLocaleString();
+  }
+
+  function buildAnalysisRow(sym, data) {
+    const { quote, target, tally } = data;
+    const { signal, reason } = calcSignal(data);
+
+    const signalKey = signal.toLowerCase().replace(/[^a-z]/g, '-').replace(/-+/g, '-');
+    const signalClass = {
+      'buy--confirmed':    'signal-buy',
+      'buy--watch':        'signal-buy-watch',
+      'buy--wait':         'signal-buy-wait',
+      'buy--unconfirmed':  'signal-buy-wait',
+      'trim':              'signal-trim',
+      'sell':              'signal-sell',
+      'sell--reversal':    'signal-sell-reversal',
+      'hold':              'signal-hold',
+      'wait':              'signal-wait',
+    }[signalKey] ?? 'signal-wait';
+
+    const upsideRaw = quote ? calcConservativeUpside(target, quote.price) : null;
+    const upside = upsideRaw !== null ? (upsideRaw * 100).toFixed(1) : null;
+    const upsideClass = upside > 0 ? 'up' : 'down';
+
+    const analystCount = (tally?.buy || 0) + (tally?.hold || 0) + (tally?.sell || 0);
+
+    const combinedInfo = data.combinedSignal ? COMBINED_SIGNAL_LABELS[data.combinedSignal] : null;
+    const volInfo       = data.volumeSignal   ? VOLUME_SIGNAL_LABELS[data.volumeSignal]     : null;
+
+    const accuracy = Array.isArray(data.analystAccuracy) ? data.analystAccuracy.slice(0, 5) : [];
+    const accuracyHtml = accuracy.length
+      ? accuracy.map(m => `<span title="${m.gradeType ? m.gradeType.toUpperCase() : ''} — ${m.correct ? 'correct so far' : 'incorrect so far'}">${m.correct ? '✅' : '❌'}</span>`).join('')
+      : '<span style="color:var(--muted)">—</span>';
+
+    const row = document.createElement('div');
+    row.className = 'analysis-row';
+    row.style.cursor = 'pointer';
+    row.title = reason;
+    row.onclick = () => openDrawer(sym);
+
+    row.innerHTML = `
+      <div class="symbol">${sym}</div>
+      <div class="signal ${signalClass}" style="font-size:0.65rem;padding:4px 8px">${signal}</div>
+      <div>${combinedInfo ? `${combinedInfo.icon} ${combinedInfo.text}` : '<span style="color:var(--muted)">—</span>'}</div>
+      <div class="${upside !== null ? upsideClass : ''}">${upside !== null ? (upside > 0 ? '+' : '') + upside + '%' : '—'}</div>
+      <div class="accuracy-icons">${accuracyHtml}</div>
+      <div>${formatMarketCap(quote?.marketCap)}</div>
+      <div>${analystCount}</div>
+      <div>${volInfo ? `${volInfo.icon} ${volInfo.text}` : '<span style="color:var(--muted)">—</span>'}</div>
+    `;
+    return row;
   }
 
   function showLoading(sym) {
@@ -6437,6 +6618,8 @@
     }
     if (connected) {
       loadOverview();
+      // Sync the List/Analysis toggle UI with the view mode restored from localStorage
+      setWatchlistView(watchlistView);
       // Watchlist is the default landing page — auto-load its signals & prices from
       // the DB cache (no FMP). ↻ Refresh still triggers refreshAll() for a full recalc.
       if (watchlist.length > 0) loadWatchlistFromCache();

@@ -504,6 +504,22 @@ app.get('/api/signals', auth, async (req, res) => {
   }
 });
 
+// Single-symbol signal (cached) — full Analysis View payload for one symbol,
+// e.g. for the drawer, without pulling the whole /api/signals map.
+app.get('/api/signals/:sym', auth, async (req, res) => {
+  const sym = req.params.sym.toUpperCase();
+  try {
+    const data = await db.getSignal(sym);
+    if (!data) return res.status(404).json({ error: 'No signal data for symbol' });
+    res.json(data);
+  } catch(e) {
+    console.error(`[db] getSignal failed for ${sym}, falling back to store:`, e.message);
+    const data = store.read('signals', {})[sym];
+    if (!data) return res.status(404).json({ error: 'No signal data for symbol' });
+    res.json(data);
+  }
+});
+
 // Signal log (cached)
 app.get('/api/signal-log', auth, async (req, res) => {
   const limit = parseInt(req.query.limit) || 200;
