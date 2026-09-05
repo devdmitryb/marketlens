@@ -69,6 +69,18 @@ async function initSchema() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS signal_events (
+        id            SERIAL PRIMARY KEY,
+        symbol        TEXT NOT NULL,
+        event_type    TEXT NOT NULL,
+        signal        TEXT,
+        volume_signal TEXT,
+        price         NUMERIC,
+        created_at    TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS signal_events_symbol_idx ON signal_events(symbol);
+      CREATE INDEX IF NOT EXISTS signal_events_created_at_idx ON signal_events(created_at DESC);
+
       CREATE TABLE IF NOT EXISTS screener (
         id           SERIAL PRIMARY KEY,
         news_url     TEXT NOT NULL UNIQUE,
@@ -388,6 +400,41 @@ async function addSignalLog(sym, newSignal, oldSignal, reason) {
   `);
 }
 
+// Signal events — permanent time-series log of key entry/exit signals,
+// recorded on every cron refresh (not just on change). See signal_log for
+// the change-only history this complements.
+async function addSignalEvent(symbol, eventType, signal, volumeSignal, price) {
+  await pool.query(
+    'INSERT INTO signal_events (symbol, event_type, signal, volume_signal, price) VALUES ($1, $2, $3, $4, $5)',
+    [symbol, eventType, signal, volumeSignal, price]
+  );
+}
+
+async function getSignalEvents(limit = 20, offset = 0, symbol = null) {
+  const params = symbol ? [symbol, limit, offset] : [limit, offset];
+  const where  = symbol ? 'WHERE symbol = $1' : '';
+  const res = await pool.query(
+    `SELECT * FROM signal_events ${where} ORDER BY created_at DESC LIMIT $${symbol ? 2 : 1} OFFSET $${symbol ? 3 : 2}`,
+    params
+  );
+  return res.rows.map(r => ({
+    id:           r.id,
+    symbol:       r.symbol,
+    eventType:    r.event_type,
+    signal:       r.signal,
+    volumeSignal: r.volume_signal,
+    price:        r.price != null ? parseFloat(r.price) : null,
+    createdAt:    r.created_at,
+  }));
+}
+
+async function getSignalEventsCount(symbol = null) {
+  const res = symbol
+    ? await pool.query('SELECT COUNT(*) FROM signal_events WHERE symbol = $1', [symbol])
+    : await pool.query('SELECT COUNT(*) FROM signal_events');
+  return parseInt(res.rows[0].count, 10);
+}
+
 // Screener
 async function getScreener(days = 7) {
   // `days` is validated to a small allowlist by the caller before it reaches the
@@ -524,6 +571,7 @@ module.exports = {
   createUser, deleteUser, updateUserPassword, touchLastActive,
   getSignals,   saveSignal, getSignal,
   getSignalLog, addSignalLog,
+  addSignalEvent, getSignalEvents, getSignalEventsCount,
   getScreener,  saveScreenerEntry, updateScreenerUpside,
   getCachedQuote,  setCachedQuote,
   getCachedGrades, setCachedGrades,
