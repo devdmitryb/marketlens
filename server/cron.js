@@ -287,6 +287,25 @@ async function refreshSymbol(sym, holdings) {
   const combinedSignal  = calcCombinedSignal(newSignal, volumeSignal);
   const analystAccuracy = calcAnalystAccuracy(grades || [], history, quote?.price);
 
+  // Signal events — permanent time-series log of key entry/exit signals.
+  // Recorded on EVERY refresh (not only on change) as a time series, and the
+  // conditions below are independent — e.g. a 'strong_entry' combinedSignal
+  // implies newSignal === 'BUY — CONFIRMED', so both events can fire together.
+  const eventTypes = [];
+  if (combinedSignal === 'strong_entry') eventTypes.push('strong_entry');
+  if (newSignal === 'BUY — CONFIRMED') eventTypes.push('buy_confirmed');
+  if (combinedSignal === 'strong_exit') eventTypes.push('strong_exit');
+  if (newSignal === 'SELL — REVERSAL') eventTypes.push('sell_reversal');
+  if (newSignal === 'TRIM') eventTypes.push('trim');
+  if (volumeSignal === 'selling') eventTypes.push('selling_pressure');
+  for (const eventType of eventTypes) {
+    try {
+      await db.addSignalEvent(sym, eventType, newSignal, volumeSignal, quote?.price);
+    } catch(e) {
+      console.error(`[db] addSignalEvent failed for ${sym} (${eventType}):`, e.message);
+    }
+  }
+
   // 6. Previous signal for change detection
   let prevSignal = null;
   try {

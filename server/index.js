@@ -533,6 +533,34 @@ app.get('/api/signal-log', auth, async (req, res) => {
   }
 });
 
+// Signal events — permanent, paginated time-series log of key entry/exit signals
+app.get('/api/signal-events', auth, async (req, res) => {
+  const limit  = parseInt(req.query.limit) || 20;
+  const offset = parseInt(req.query.offset) || 0;
+  const symbol = req.query.symbol ? String(req.query.symbol).toUpperCase() : null;
+  try {
+    const [events, total] = await Promise.all([
+      db.getSignalEvents(limit, offset, symbol),
+      db.getSignalEventsCount(symbol),
+    ]);
+    res.json({ events, total });
+  } catch(e) {
+    console.error('[db] getSignalEvents failed:', e.message);
+    res.status(500).json({ error: 'Failed to load signal events' });
+  }
+});
+
+app.get('/api/signal-events/count', auth, async (req, res) => {
+  const symbol = req.query.symbol ? String(req.query.symbol).toUpperCase() : null;
+  try {
+    const total = await db.getSignalEventsCount(symbol);
+    res.json({ total });
+  } catch(e) {
+    console.error('[db] getSignalEventsCount failed:', e.message);
+    res.status(500).json({ error: 'Failed to load signal events count' });
+  }
+});
+
 // Watchlist — per-user, read/write from server (shared across devices!)
 app.get('/api/watchlist', auth, async (req, res) => {
   try {
