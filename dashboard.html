@@ -975,6 +975,8 @@
       gap: 6px;
     }
     .slog-arrow { color: var(--muted); }
+    .sev-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 16px; }
+    .sev-pagination .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* ── BACKTEST ── */
     .bt-toolbar {
@@ -1516,6 +1518,7 @@
     <button onclick="showPage('screener')">Screener</button>
     <button onclick="showPage('portfolio')">💼 Portfolio</button>
     <button onclick="showPage('signallog')" id="nav-signallog">📓 Signal Log</button>
+    <button onclick="showPage('signalevents')" id="nav-signalevents">⚡ Events</button>
     <button onclick="showPage('practice')">Practice</button>
     <button onclick="showPage('backtest')">🔬 Backtest</button>
     <button onclick="showPage('admin')" id="nav-admin" style="display:none">🛡️ Admin</button>
@@ -1768,6 +1771,36 @@
         <div class="big">📓</div>
         <p>No signals logged yet.<br/>Open Watchlist or Portfolio and click <strong>Refresh</strong> — signals will appear here.</p>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══ SIGNAL EVENTS PAGE ═══ -->
+  <div class="page" id="page-signalevents">
+    <div class="slog-toolbar">
+      <div class="filter-group">
+        <select id="sev-symbol" onchange="setSevFilter()"
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-family:var(--mono);font-size:0.8rem">
+          <option value="">All Symbols</option>
+        </select>
+        <button class="filter-btn active-all" id="sev-all"   onclick="setSevTypeFilter('all')">All</button>
+        <button class="filter-btn"            id="sev-entry" onclick="setSevTypeFilter('entry')">🟢 Entry signals</button>
+        <button class="filter-btn"            id="sev-exit"  onclick="setSevTypeFilter('exit')">🔴 Exit signals</button>
+      </div>
+      <button class="btn secondary" onclick="clearSevFilters()" style="margin-left:auto;font-size:0.75rem">✕ Clear Filters</button>
+    </div>
+    <div class="slog-header" style="grid-template-columns:140px 80px 1fr 160px 90px 90px">
+      <div>Time</div><div>Symbol</div><div>Event</div><div>Signal</div><div>Vol</div><div>Price</div>
+    </div>
+    <div class="slog-list" id="sevList">
+      <div class="empty-state">
+        <div class="big">⚡</div>
+        <p>No signal events yet.<br/>Events are recorded automatically every time the server refreshes a symbol.</p>
+      </div>
+    </div>
+    <div class="sev-pagination" id="sevPagination" style="display:none">
+      <button class="btn secondary" id="sev-prev" onclick="sevGoPage(-1)">← Prev</button>
+      <span id="sevPageLabel" style="font-family:var(--mono);font-size:0.8rem;color:var(--text-dim)"></span>
+      <button class="btn secondary" id="sev-next" onclick="sevGoPage(1)">Next →</button>
     </div>
   </div>
 
@@ -2281,6 +2314,10 @@
       updateSlogBadge();
       renderSlog();
       if (serverAvailable) autoRefreshForSlog();
+    }
+    if (name === 'signalevents') {
+      initSevSymbolSelector();
+      loadSignalEvents();
     }
     if (name === 'admin') {
       loadAdminUsers();
@@ -5061,6 +5098,146 @@
       `;
       list.appendChild(row);
     });
+  }
+
+  // ══════════════════════════════════════════
+  //  SIGNAL EVENTS
+  // ══════════════════════════════════════════
+  const SEV_PAGE_SIZE = 20;
+  let sevSymbol   = '';
+  let sevType     = 'all';   // 'all' | 'entry' | 'exit'
+  let sevPage     = 0;       // 0-indexed
+  let sevTotal    = 0;
+  let sevEvents   = [];
+
+  const SEV_META = {
+    strong_entry:     { label: '⭐ Strong Entry',      kind: 'entry' },
+    buy_confirmed:    { label: '🟢 BUY Confirmed',     kind: 'entry' },
+    strong_exit:      { label: '🔴 Strong Exit',       kind: 'exit'  },
+    sell_reversal:    { label: '🔴 SELL Reversal',     kind: 'exit'  },
+    trim:             { label: '⚠️ TRIM',              kind: 'exit'  },
+    selling_pressure: { label: '⚠️ Selling Pressure',  kind: 'exit'  },
+  };
+
+  function initSevSymbolSelector() {
+    const sel = document.getElementById('sev-symbol');
+    if (!sel) return;
+    const practiceSyms = practiceAccounts.flatMap(a => a.open.map(p => p.sym));
+    const allSyms = [...new Set([
+      ...watchlist,
+      ...openPositions.map(p => p.sym),
+      ...practiceSyms,
+    ])].sort();
+    const current = sel.value;
+    sel.innerHTML = `<option value="">All Symbols</option>` +
+      allSyms.map(s => `<option value="${s}">${s}</option>`).join('');
+    sel.value = current || sevSymbol || '';
+  }
+
+  function setSevFilter() {
+    sevSymbol = document.getElementById('sev-symbol').value;
+    sevPage = 0;
+    loadSignalEvents();
+  }
+
+  function setSevTypeFilter(t) {
+    sevType = t;
+    sevPage = 0;
+    document.querySelectorAll('.filter-btn').forEach(b => {
+      if (['sev-all','sev-entry','sev-exit'].includes(b.id)) b.className = 'filter-btn';
+    });
+    const map = { all: 'active-all', entry: 'active-buy', exit: 'active-sell' };
+    document.getElementById('sev-' + t).classList.add(map[t] || 'active-all');
+    renderSev();
+  }
+
+  function clearSevFilters() {
+    sevSymbol = '';
+    sevType = 'all';
+    sevPage = 0;
+    document.getElementById('sev-symbol').value = '';
+    document.querySelectorAll('.filter-btn').forEach(b => {
+      if (['sev-all','sev-entry','sev-exit'].includes(b.id)) b.className = 'filter-btn';
+    });
+    document.getElementById('sev-all').classList.add('active-all');
+    loadSignalEvents();
+  }
+
+  function sevGoPage(delta) {
+    const maxPage = Math.max(0, Math.ceil(sevTotal / SEV_PAGE_SIZE) - 1);
+    sevPage = Math.min(maxPage, Math.max(0, sevPage + delta));
+    loadSignalEvents();
+  }
+
+  async function loadSignalEvents() {
+    const list = document.getElementById('sevList');
+    if (!list) return;
+    if (!serverAvailable) {
+      list.innerHTML = `<div class="empty-state"><div class="big">⚡</div><p>Server unreachable — signal events require the server.</p></div>`;
+      return;
+    }
+    try {
+      const params = new URLSearchParams({
+        limit:  SEV_PAGE_SIZE,
+        offset: sevPage * SEV_PAGE_SIZE,
+      });
+      if (sevSymbol) params.set('symbol', sevSymbol);
+      const data = await smartFetch(`/api/signal-events?${params}`);
+      sevEvents = data.events || [];
+      sevTotal  = data.total || 0;
+      renderSev();
+    } catch(e) {
+      console.warn('Failed to load signal events:', e.message);
+      list.innerHTML = `<div class="empty-state"><div class="big">⚡</div><p>Failed to load signal events.</p></div>`;
+    }
+  }
+
+  function renderSev() {
+    const list = document.getElementById('sevList');
+    if (!list) return;
+
+    let entries = [...sevEvents];
+    if (sevType !== 'all') entries = entries.filter(e => SEV_META[e.eventType]?.kind === sevType);
+
+    if (entries.length === 0) {
+      list.innerHTML = `<div class="empty-state"><div class="big">⚡</div><p>No signal events for this filter.</p></div>`;
+    } else {
+      list.innerHTML = '';
+      entries.forEach((e, i) => {
+        const meta = SEV_META[e.eventType] || { label: e.eventType, kind: 'entry' };
+        const row  = document.createElement('div');
+        row.className = `slog-row type-${meta.kind === 'entry' ? 'buy' : 'sell'}`;
+        const tint = meta.kind === 'entry' ? 'rgba(61,245,193,0.06)' : 'rgba(255,77,109,0.06)';
+        row.style.cssText = `grid-template-columns:140px 80px 1fr 160px 90px 90px;cursor:pointer;background:${tint}`;
+        row.style.animationDelay = `${i * 0.03}s`;
+        row.onclick = () => openDrawer(e.symbol);
+
+        const dt = new Date(e.createdAt);
+        const dateStr = dt.toLocaleDateString('en-CA', { month:'short', day:'numeric' });
+        const timeStr = dt.toLocaleTimeString('en-CA', { hour:'2-digit', minute:'2-digit' });
+
+        row.innerHTML = `
+          <div class="slog-date">${dateStr}<br/><span style="opacity:0.6">${timeStr}</span></div>
+          <div class="slog-sym">${e.symbol}</div>
+          <div class="slog-desc">${meta.label}</div>
+          <div class="slog-desc" style="font-size:0.75rem">${e.signal || '—'}</div>
+          <div style="font-size:0.75rem;color:var(--text-dim)">${e.volumeSignal || '—'}</div>
+          <div style="font-family:var(--mono);font-size:0.8rem">${e.price != null ? '$' + Number(e.price).toFixed(2) : '—'}</div>
+        `;
+        list.appendChild(row);
+      });
+    }
+
+    const pagination = document.getElementById('sevPagination');
+    const totalPages = Math.max(1, Math.ceil(sevTotal / SEV_PAGE_SIZE));
+    if (sevTotal > 0) {
+      pagination.style.display = 'flex';
+      document.getElementById('sevPageLabel').textContent = `Page ${sevPage + 1} of ${totalPages}`;
+      document.getElementById('sev-prev').disabled = sevPage <= 0;
+      document.getElementById('sev-next').disabled = sevPage >= totalPages - 1;
+    } else {
+      pagination.style.display = 'none';
+    }
   }
 
   // ══════════════════════════════════════════
