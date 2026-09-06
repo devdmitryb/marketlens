@@ -1648,12 +1648,18 @@
   <div class="page" id="page-screener">
 
     <div class="screener-toolbar">
-      <div class="filter-group">
-        <button class="filter-btn active-all" id="f-all"      onclick="setFilter('all')">All</button>
-        <button class="filter-btn"            id="f-upgrade"  onclick="setFilter('upgrade')">↑ Upgrades</button>
-        <button class="filter-btn"            id="f-downgrade"onclick="setFilter('downgrade')">↓ Downgrades</button>
-        <button class="filter-btn"            id="f-init"     onclick="setFilter('init')">★ New Coverage</button>
-        <button class="filter-btn"            id="f-new"      onclick="setFilter('new')">🟢 New Since Last Visit</button>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="portfolio-tabs" id="screenerViewToggle" style="margin-bottom:0">
+          <button class="ptab active" id="scv-list"     onclick="setScreenerView('list')">📋 List</button>
+          <button class="ptab"        id="scv-analysis" onclick="setScreenerView('analysis')">📊 Analysis</button>
+        </div>
+        <div class="filter-group">
+          <button class="filter-btn active-all" id="f-all"      onclick="setFilter('all')">All</button>
+          <button class="filter-btn"            id="f-upgrade"  onclick="setFilter('upgrade')">↑ Upgrades</button>
+          <button class="filter-btn"            id="f-downgrade"onclick="setFilter('downgrade')">↓ Downgrades</button>
+          <button class="filter-btn"            id="f-init"     onclick="setFilter('init')">★ New Coverage</button>
+          <button class="filter-btn"            id="f-new"      onclick="setFilter('new')">🟢 New Since Last Visit</button>
+        </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin-left:auto;flex-wrap:wrap">
         <label style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--text-dim);white-space:nowrap" title="Conservative: min analyst target −25%">
@@ -1682,7 +1688,7 @@
       </div>
     </div>
 
-    <div class="screener-header">
+    <div class="screener-header" id="screenerListHeader">
       <div>Symbol</div>
       <div>Headline</div>
       <div>Analyst</div>
@@ -1697,6 +1703,10 @@
         <p>Click <strong>Refresh</strong> to load the latest analyst moves.</p>
       </div>
     </div>
+    <div class="analysis-header" id="screenerAnalysisHeader" style="display:none">
+      <div>Symbol</div><div>Signal</div><div>Combined</div><div>Upside %</div><div>Accuracy</div><div>Market Cap</div><div>Analysts</div><div>Volume Signal</div>
+    </div>
+    <div class="analysis-table" id="screenerAnalysisTable" style="display:none"></div>
 
   </div>
 
@@ -1722,22 +1732,32 @@
         <button class="btn" onclick="openAddPosition()">+ Add Position</button>
       </div>
     </div>
-    <div class="filter-group" style="margin-bottom:16px">
-      <button class="filter-btn active-all" id="pf-all"       onclick="setPortfolioFilter('all')">All</button>
-      <button class="filter-btn" id="pf-action"    onclick="setPortfolioFilter('action')">🔴 Action Needed</button>
-      <button class="filter-btn" id="pf-confirmed" onclick="setPortfolioFilter('confirmed')">🟢 Confirmed</button>
-      <button class="filter-btn" id="pf-watch"     onclick="setPortfolioFilter('watch')">👁 Watch</button>
-      <button class="filter-btn" id="pf-wait"      onclick="setPortfolioFilter('wait')">⏳ Wait</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div class="filter-group">
+        <button class="filter-btn active-all" id="pf-all"       onclick="setPortfolioFilter('all')">All</button>
+        <button class="filter-btn" id="pf-action"    onclick="setPortfolioFilter('action')">🔴 Action Needed</button>
+        <button class="filter-btn" id="pf-confirmed" onclick="setPortfolioFilter('confirmed')">🟢 Confirmed</button>
+        <button class="filter-btn" id="pf-watch"     onclick="setPortfolioFilter('watch')">👁 Watch</button>
+        <button class="filter-btn" id="pf-wait"      onclick="setPortfolioFilter('wait')">⏳ Wait</button>
+      </div>
+      <div class="portfolio-tabs" id="portfolioViewToggle" style="margin-bottom:0">
+        <button class="ptab active" id="pv-list"     onclick="setPortfolioView('list')">📋 List</button>
+        <button class="ptab"        id="pv-analysis" onclick="setPortfolioView('analysis')">📊 Analysis</button>
+      </div>
     </div>
 
     <!-- Open positions -->
     <div id="portfolio-open">
-      <div class="pos-header">
+      <div class="pos-header" id="portfolioPosHeader">
         <div>Symbol</div><div>Shares</div><div>Entry</div><div>Current</div><div>P&L $</div><div>Note</div><div>Signal</div><div>Next Event</div><div>Days</div>
       </div>
       <div class="pos-table" id="openPositionsTable">
         <div class="empty-state"><div class="big">💼</div><p>No open positions yet.<br/>Click <strong>+ Add Position</strong> to record your first trade.</p></div>
       </div>
+      <div class="analysis-header" id="portfolioAnalysisHeader" style="display:none">
+        <div>Symbol</div><div>Signal</div><div>Combined</div><div>Upside %</div><div>Accuracy</div><div>Market Cap</div><div>Analysts</div><div>Volume Signal</div>
+      </div>
+      <div class="analysis-table" id="portfolioAnalysisTable" style="display:none"></div>
     </div>
 
     <!-- Closed positions -->
@@ -1952,22 +1972,32 @@
         <button class="btn secondary" onclick="refreshPracticeSignals()" style="font-size:0.8rem">↻ Signals</button>
       </div>
     </div>
-    <div class="filter-group" style="margin-bottom:16px">
-      <button class="filter-btn active-all" id="prfi-all"       onclick="setPracticeFilter('all')">All</button>
-      <button class="filter-btn" id="prfi-action"    onclick="setPracticeFilter('action')">🔴 Action Needed</button>
-      <button class="filter-btn" id="prfi-confirmed" onclick="setPracticeFilter('confirmed')">🟢 Confirmed</button>
-      <button class="filter-btn" id="prfi-watch"     onclick="setPracticeFilter('watch')">👁 Watch</button>
-      <button class="filter-btn" id="prfi-wait"      onclick="setPracticeFilter('wait')">⏳ Wait</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div class="filter-group">
+        <button class="filter-btn active-all" id="prfi-all"       onclick="setPracticeFilter('all')">All</button>
+        <button class="filter-btn" id="prfi-action"    onclick="setPracticeFilter('action')">🔴 Action Needed</button>
+        <button class="filter-btn" id="prfi-confirmed" onclick="setPracticeFilter('confirmed')">🟢 Confirmed</button>
+        <button class="filter-btn" id="prfi-watch"     onclick="setPracticeFilter('watch')">👁 Watch</button>
+        <button class="filter-btn" id="prfi-wait"      onclick="setPracticeFilter('wait')">⏳ Wait</button>
+      </div>
+      <div class="portfolio-tabs" id="practiceViewToggle" style="margin-bottom:0">
+        <button class="ptab active" id="prv-list"     onclick="setPracticeView('list')">📋 List</button>
+        <button class="ptab"        id="prv-analysis" onclick="setPracticeView('analysis')">📊 Analysis</button>
+      </div>
     </div>
 
     <!-- Open positions -->
     <div id="practice-open">
-      <div class="pos-header" style="grid-template-columns:80px 80px 90px 90px 90px 1fr 110px 90px">
+      <div class="pos-header" id="practicePosHeader" style="grid-template-columns:80px 80px 90px 90px 90px 1fr 110px 90px">
         <div>Symbol</div><div>Shares</div><div>Entry</div><div>Current</div><div>P&L $</div><div>Note</div><div>Signal</div><div>Days</div>
       </div>
       <div class="pos-table" id="practiceOpenTable">
         <div class="empty-state"><div class="big">🎮</div><p>No practice positions yet.<br/>Open any stock card from Watchlist or Screener<br/>and click <strong>🎮 Practice Buy</strong>.</p></div>
       </div>
+      <div class="analysis-header" id="practiceAnalysisHeader" style="display:none">
+        <div>Symbol</div><div>Signal</div><div>Combined</div><div>Upside %</div><div>Accuracy</div><div>Market Cap</div><div>Analysts</div><div>Volume Signal</div>
+      </div>
+      <div class="analysis-table" id="practiceAnalysisTable" style="display:none"></div>
     </div>
 
     <!-- Closed positions -->
@@ -3023,38 +3053,56 @@
     }
   }
 
-  // ── Analysis View: one compact row per symbol, sourced entirely from
-  // stockData (itself populated from /api/signals) — no extra FMP calls.
-  function renderWatchlistAnalysisTable() {
-    const container = document.getElementById('watchlistAnalysisTable');
+  // ── Generic Analysis View table — one compact buildAnalysisRow() per symbol,
+  // used by Watchlist, Portfolio, Practice, and Screener. Data for each symbol
+  // is resolved via opts.dataForSymbol (stockData[sym] by default, itself
+  // populated from /api/signals) — no extra FMP calls are made here.
+  function renderAnalysisTable(symbols, containerId, opts = {}) {
+    const {
+      filterFn         = null,                       // (sym, data) => boolean
+      dataForSymbol    = (sym) => stockData[sym],
+      emptyIcon        = '📡',
+      emptyMsg         = 'No symbols to show.',
+      filteredEmptyMsg = 'No symbols match this filter right now.',
+      onClearFilter    = null,                        // e.g. "setWatchFilter('all')"
+    } = opts;
+
+    const container = document.getElementById(containerId);
     if (!container) return;
-    if (watchlist.length === 0) {
-      container.innerHTML = `<div class="empty-state">
-        <div class="big">📡</div>
-        <p>Add a symbol above to start tracking.<br/>
-        Make sure your API key is saved, then try <code>AAPL</code> or <code>NVDA</code>.</p>
-      </div>`;
+
+    if (!symbols || symbols.length === 0) {
+      container.innerHTML = `<div class="empty-state"><div class="big">${emptyIcon}</div><p>${emptyMsg}</p></div>`;
       return;
     }
+
     container.innerHTML = '';
     let shown = 0;
-    watchlist.forEach(sym => {
-      const data = stockData[sym];
+    symbols.forEach(sym => {
+      const data = dataForSymbol(sym);
       if (!data) return;
-      if (watchFilter !== 'all') {
-        const { signal } = calcSignal(data);
-        if (!signalMatchesFilter(signal, watchFilter)) return;
-      }
+      if (filterFn && !filterFn(sym, data)) return;
       container.appendChild(buildAnalysisRow(sym, data));
       shown++;
     });
+
     if (shown === 0) {
       container.innerHTML = `<div class="empty-state">
         <div class="big">🔍</div>
-        <p>No symbols match this filter right now.<br/>
-        <button class="btn secondary" style="margin-top:12px" onclick="setWatchFilter('all')">Show All</button></p>
+        <p>${filteredEmptyMsg}${onClearFilter ? `<br/><button class="btn secondary" style="margin-top:12px" onclick="${onClearFilter}">Show All</button>` : ''}</p>
       </div>`;
     }
+  }
+
+  function renderWatchlistAnalysisTable() {
+    renderAnalysisTable(watchlist, 'watchlistAnalysisTable', {
+      filterFn: (sym, data) => {
+        if (watchFilter === 'all') return true;
+        const { signal } = calcSignal(data);
+        return signalMatchesFilter(signal, watchFilter);
+      },
+      emptyMsg: 'Add a symbol above to start tracking.<br/>Make sure your API key is saved, then try <code>AAPL</code> or <code>NVDA</code>.',
+      onClearFilter: "setWatchFilter('all')",
+    });
   }
 
   const COMBINED_SIGNAL_LABELS = {
@@ -3235,6 +3283,39 @@
   let screenerSizeFilter = { large: true, mid: true, small: true, micro: true, unknown: true };
   let screenerDays = 7;  // server-side time window: 7 | 30 | 90 days
 
+  // ── Screener View Toggle (List / Analysis) ──
+  let screenerView = localStorage.getItem('screenerView') === 'analysis' ? 'analysis' : 'list';
+
+  function setScreenerView(view) {
+    screenerView = view;
+    localStorage.setItem('screenerView', view);
+    document.getElementById('scv-list').classList.toggle('active', view === 'list');
+    document.getElementById('scv-analysis').classList.toggle('active', view === 'analysis');
+    document.getElementById('screenerListHeader').style.display     = view === 'list' ? 'grid' : 'none';
+    document.getElementById('screenerList').style.display           = view === 'list' ? '' : 'none';
+    document.getElementById('screenerAnalysisHeader').style.display = view === 'analysis' ? 'grid' : 'none';
+    document.getElementById('screenerAnalysisTable').style.display  = view === 'analysis' ? '' : 'none';
+    renderScreener();
+  }
+
+  // Screener symbols usually aren't in stockData (no drill-down fetch happened yet) —
+  // fall back to the upside/marketCap the enrichment job already cached so
+  // buildAnalysisRow() still has something to compute Upside % / Market Cap from.
+  function screenerRowData(sym, rows) {
+    if (stockData[sym]) return stockData[sym];
+    const item = rows.find(r => r.symbol === sym);
+    const ud = item?.upsideData;
+    if (!ud || ud.price == null) {
+      return { quote: null, target: null, tally: { buy: 0, hold: 0, sell: 0 }, momentum: null };
+    }
+    return {
+      quote:  { price: ud.price, marketCap: ud.marketCap ?? null },
+      target: ud.target != null ? { targetConsensus: ud.target } : null,
+      tally:  { buy: 0, hold: 0, sell: 0 },
+      momentum: null,
+    };
+  }
+
   // ── "Not Interested" — skip a symbol on Screener for a growing cooldown period
   function loadSkipped() {
     try { return JSON.parse(localStorage.getItem('screener_skipped') || '{}'); }
@@ -3382,12 +3463,6 @@
     // Market-cap filter (time window is filtered server-side via ?days)
     rows = rows.filter(matchesMarketCap);
 
-    if (rows.length === 0) {
-      list.innerHTML = `<div class="empty-state"><div class="big">🔍</div><p>No results for this filter.</p></div>`;
-      return;
-    }
-
-    list.innerHTML = '';
     // Filter out ADR symbols (5 letters ending in Y or F) and OTC pink sheets
     const isADR = sym => /^[A-Z]{4,5}[YF]$/.test(sym) || sym.includes('.');
     rows = rows.filter(item => !isADR(item.symbol));
@@ -3399,13 +3474,35 @@
       rows = rows.filter(item => !(skipped[item.symbol] && skipped[item.symbol].until > today));
     }
 
+    // Upside threshold filter (only when upside data is available)
+    rows = rows.filter(item => {
+      const upside = screenerUpside.hasOwnProperty(item.symbol) ? screenerUpside[item.symbol] : undefined;
+      const hasUpside = upside !== undefined && upside !== null;
+      return !(hasUpside && upside < threshold);
+    });
+
+    if (screenerView === 'analysis') {
+      const uniqueSyms = [...new Set(rows.map(r => r.symbol))];
+      renderAnalysisTable(uniqueSyms, 'screenerAnalysisTable', {
+        dataForSymbol: sym => screenerRowData(sym, rows),
+        emptyIcon: '🔍',
+        emptyMsg: 'No results for this filter.',
+        filteredEmptyMsg: 'No results for this filter.',
+      });
+      return;
+    }
+
+    if (rows.length === 0) {
+      list.innerHTML = `<div class="empty-state"><div class="big">🔍</div><p>No results for this filter.</p></div>`;
+      return;
+    }
+
+    list.innerHTML = '';
+
     rows.forEach((item, i) => {
       const isNew = new Date(item.publishedDate).getTime() > lastVisitTime;
       const upside = screenerUpside.hasOwnProperty(item.symbol) ? screenerUpside[item.symbol] : undefined;
       const hasUpside = upside !== undefined && upside !== null;
-
-      // Hide rows below threshold (only when upside data is available)
-      if (hasUpside && upside < threshold) return; // valid inside forEach callback
 
       const row = document.createElement('div');
       row.className = 'screener-row' + (hasUpside ? ' interesting' : '');
@@ -4420,6 +4517,21 @@
     if (btn) { btn.textContent = '↻ Refresh Signals'; btn.disabled = false; }
   }
 
+  // ── Portfolio View Toggle (List / Analysis) ──
+  let portfolioView = localStorage.getItem('portfolioView') === 'analysis' ? 'analysis' : 'list';
+
+  function setPortfolioView(view) {
+    portfolioView = view;
+    localStorage.setItem('portfolioView', view);
+    document.getElementById('pv-list').classList.toggle('active', view === 'list');
+    document.getElementById('pv-analysis').classList.toggle('active', view === 'analysis');
+    document.getElementById('portfolioPosHeader').style.display      = view === 'list' ? 'grid' : 'none';
+    document.getElementById('openPositionsTable').style.display      = view === 'list' ? '' : 'none';
+    document.getElementById('portfolioAnalysisHeader').style.display = view === 'analysis' ? 'grid' : 'none';
+    document.getElementById('portfolioAnalysisTable').style.display  = view === 'analysis' ? '' : 'none';
+    renderOpenPositions();
+  }
+
   let portfolioFilter = 'all';
   function setPortfolioFilter(f) {
     portfolioFilter = f;
@@ -4428,6 +4540,21 @@
       if (btn) btn.className = 'filter-btn' + (id === f ? (f==='action'?' active-sell':' active-all') : '');
     });
     renderOpenPositions();
+  }
+
+  // ── Practice View Toggle (List / Analysis) ──
+  let practiceView = localStorage.getItem('practiceView') === 'analysis' ? 'analysis' : 'list';
+
+  function setPracticeView(view) {
+    practiceView = view;
+    localStorage.setItem('practiceView', view);
+    document.getElementById('prv-list').classList.toggle('active', view === 'list');
+    document.getElementById('prv-analysis').classList.toggle('active', view === 'analysis');
+    document.getElementById('practicePosHeader').style.display      = view === 'list' ? 'grid' : 'none';
+    document.getElementById('practiceOpenTable').style.display      = view === 'list' ? '' : 'none';
+    document.getElementById('practiceAnalysisHeader').style.display = view === 'analysis' ? 'grid' : 'none';
+    document.getElementById('practiceAnalysisTable').style.display  = view === 'analysis' ? '' : 'none';
+    renderPractice();
   }
 
   let practiceFilter = 'all';
@@ -4591,6 +4718,20 @@
   }
 
   function renderOpenPositions() {
+    if (portfolioView === 'analysis') {
+      const syms = [...new Set(openPositions.map(p => p.sym))];
+      renderAnalysisTable(syms, 'portfolioAnalysisTable', {
+        filterFn: (sym, data) => {
+          if (portfolioFilter === 'all') return true;
+          const { signal } = calcSignal(data);
+          return signalMatchesPortfolioFilter(signal, portfolioFilter);
+        },
+        emptyIcon: '💼',
+        emptyMsg: 'No open positions yet.<br/>Click <strong>+ Add Position</strong> to record your first trade.',
+        onClearFilter: "setPortfolioFilter('all')",
+      });
+      return;
+    }
     const tbl = document.getElementById('openPositionsTable');
     if (openPositions.length === 0) {
       tbl.innerHTML = `<div class="empty-state"><div class="big">💼</div><p>No open positions yet.<br/>Click <strong>+ Add Position</strong> to record your first trade.</p></div>`;
@@ -5889,12 +6030,25 @@
     } else { roiEl.textContent = '—'; roiEl.className = 's-value'; }
 
     // Open positions
-    const openTbl = document.getElementById('practiceOpenTable');
-    if (acc.open.length === 0) {
-      openTbl.innerHTML = `<div class="empty-state"><div class="big">🎮</div><p>No practice positions.<br/>Click <strong>+ Buy</strong> to start.</p></div>`;
+    if (practiceView === 'analysis') {
+      const syms = [...new Set(acc.open.map(p => p.sym))];
+      renderAnalysisTable(syms, 'practiceAnalysisTable', {
+        filterFn: (sym, data) => {
+          if (practiceFilter === 'all') return true;
+          const { signal } = calcSignal(data);
+          return signalMatchesPortfolioFilter(signal, practiceFilter);
+        },
+        emptyIcon: '🎮',
+        emptyMsg: 'No practice positions.<br/>Click <strong>+ Buy</strong> to start.',
+        onClearFilter: "setPracticeFilter('all')",
+      });
     } else {
-      openTbl.innerHTML = '';
-      acc.open.forEach((pos, i) => {
+      const openTbl = document.getElementById('practiceOpenTable');
+      if (acc.open.length === 0) {
+        openTbl.innerHTML = `<div class="empty-state"><div class="big">🎮</div><p>No practice positions.<br/>Click <strong>+ Buy</strong> to start.</p></div>`;
+      } else {
+        openTbl.innerHTML = '';
+        acc.open.forEach((pos, i) => {
         // Apply signal filter
         if (practiceFilter !== 'all') {
           const sigResult = stockData[pos.sym] ? calcSignal(stockData[pos.sym]) : null;
@@ -5934,6 +6088,7 @@
           </div>`;
         openTbl.appendChild(row);
       });
+    }
     }
 
     // Closed positions
@@ -6797,6 +6952,9 @@
       loadOverview();
       // Sync the List/Analysis toggle UI with the view mode restored from localStorage
       setWatchlistView(watchlistView);
+      setPortfolioView(portfolioView);
+      setPracticeView(practiceView);
+      setScreenerView(screenerView);
       // Watchlist is the default landing page — auto-load its signals & prices from
       // the DB cache (no FMP). ↻ Refresh still triggers refreshAll() for a full recalc.
       if (watchlist.length > 0) loadWatchlistFromCache();
