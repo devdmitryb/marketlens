@@ -2038,6 +2038,7 @@
     <div class="section-title">Email</div>
     <div class="watchlist-bar" style="flex-wrap:wrap">
       <button class="btn secondary" onclick="sendTestEmail()">📧 Send Test Email</button>
+      <button class="btn secondary" id="forceRefreshBtn" onclick="forceRefreshAll()">🔄 Refresh All Symbols</button>
     </div>
 
     <div class="section-title">Users</div>
@@ -2504,6 +2505,27 @@
       if (!res.ok || data.error) { toast(data.error || 'Failed to send test email', 'error'); return; }
       toast('Test email sent ✅', 'success');
     } catch(e) { toast('Failed to send test email: ' + e.message, 'error'); }
+  }
+
+  async function forceRefreshAll() {
+    const btn = document.getElementById('forceRefreshBtn');
+    const original = btn.textContent;
+    btn.textContent = '⏳ Refreshing…';
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/refresh`, {
+        method: 'POST',
+        headers: { 'x-app-token': APP_TOKEN },
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) { toast(data.error || 'Failed to start refresh', 'error'); return; }
+      toast(data.message || 'Refresh started ✅', 'success');
+    } catch(e) {
+      toast('Failed to start refresh: ' + e.message, 'error');
+    } finally {
+      btn.textContent = original;
+      btn.disabled = false;
+    }
   }
 
   function escapeHtml(str) {
