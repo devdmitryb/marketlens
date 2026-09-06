@@ -236,8 +236,13 @@ function calcCombinedSignal(signal, volumeSignal) {
 // comparing the price at rating time (looked up in already-fetched price
 // history) against the current price. A grade whose date falls outside the
 // supplied history window (no matching row) is skipped rather than guessed at.
-function calcAnalystAccuracy(grades, history, currentPrice) {
+// Grades are limited to the last 90 days — same window as tallyGrades() —
+// so the accuracy icons and the analyst count reflect the same grade set.
+function calcAnalystAccuracy(grades, history, currentPrice, windowDays = 90) {
   if (!grades || !grades.length || currentPrice == null || !history || !history.length) return [];
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - windowDays);
 
   const sortedHistory = [...history].sort((a, b) => (a.date < b.date ? -1 : 1));
   const findPriceOnOrAfter = (dateStr) => {
@@ -246,6 +251,7 @@ function calcAnalystAccuracy(grades, history, currentPrice) {
   };
 
   const candidates = grades
+    .filter(g => new Date(g.date) >= cutoff)
     .map(g => ({ date: String(g.date).slice(0, 10), gradeType: classifyGrade(g.newGrade) }))
     .filter(g => g.gradeType === 'buy' || g.gradeType === 'sell')
     .sort((a, b) => (a.date < b.date ? 1 : -1)) // most recent first
