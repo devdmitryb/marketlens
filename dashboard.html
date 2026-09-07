@@ -2846,6 +2846,52 @@
     }
   }
 
+  // Symbols outside the Watchlist (Portfolio/Practice/Screener) never go through
+  // loadWatchlistFromCache() above, so stockData[sym] is missing (or lacks)
+  // combinedSignal/volumeSignal/analystAccuracy — Analysis View shows dashes for
+  // those columns. This fetches the same pre-computed /api/signals map on demand
+  // and merges those fields in, shared by all three pages' Analysis View toggles.
+  let signalsCache = null; // { ts, data } — /api/signals response
+  const SIGNALS_CACHE_TTL = 5 * 60 * 1000;
+
+  async function loadSignalsIntoStockData(symbols) {
+    if (!serverAvailable || !APP_TOKEN || !symbols || symbols.length === 0) return;
+
+    let signals = signalsCache && (Date.now() - signalsCache.ts) < SIGNALS_CACHE_TTL
+      ? signalsCache.data
+      : null;
+
+    if (!signals) {
+      try {
+        const headers = { 'x-app-token': APP_TOKEN };
+        signals = await fetch(`${SERVER_URL}/api/signals`, { headers })
+          .then(r => r.ok ? r.json() : {})
+          .catch(() => ({}));
+        signalsCache = { ts: Date.now(), data: signals };
+      } catch (e) {
+        console.warn('loadSignalsIntoStockData failed:', e.message);
+        return;
+      }
+    }
+
+    symbols.forEach(sym => {
+      const sig = signals[sym] || signals[sym.toUpperCase()];
+      if (!sig) return;
+      if (!stockData[sym]) {
+        // Same shape as loadWatchlistFromCache() so buildAnalysisRow()/calcSignal()
+        // have something usable for quote/target/tally, not just the merged fields
+        const tally  = sig.tally || { buy: 0, hold: 0, sell: 0 };
+        const target = sig.target != null ? { targetConsensus: sig.target } : null;
+        const quote  = sig.price != null ? { price: sig.price, changePercentage: 0 } : null;
+        stockData[sym] = { quote, target, tally, momentum: null };
+      }
+      stockData[sym].serverSignal    = { signal: sig.signal, reason: sig.reason };
+      stockData[sym].combinedSignal  = sig.combinedSignal  ?? null;
+      stockData[sym].volumeSignal    = sig.volumeSignal    ?? null;
+      stockData[sym].analystAccuracy = sig.analystAccuracy ?? null;
+    });
+  }
+
   // ══════════════════════════════════════════
   //  SIGNAL ENGINE — IX HUNTING STRATEGY
   // ══════════════════════════════════════════
@@ -3317,6 +3363,10 @@
     document.getElementById('screenerList').style.display           = view === 'list' ? '' : 'none';
     document.getElementById('screenerAnalysisHeader').style.display = view === 'analysis' ? 'grid' : 'none';
     document.getElementById('screenerAnalysisTable').style.display  = view === 'analysis' ? '' : 'none';
+    if (view === 'analysis') {
+      const syms = [...new Set(screenerData.map(r => r.symbol))];
+      loadSignalsIntoStockData(syms).then(renderScreener);
+    }
     renderScreener();
   }
 
@@ -4616,6 +4666,10 @@
     document.getElementById('openPositionsTable').style.display      = view === 'list' ? '' : 'none';
     document.getElementById('portfolioAnalysisHeader').style.display = view === 'analysis' ? 'grid' : 'none';
     document.getElementById('portfolioAnalysisTable').style.display  = view === 'analysis' ? '' : 'none';
+    if (view === 'analysis') {
+      const syms = [...new Set(openPositions.map(p => p.sym))];
+      loadSignalsIntoStockData(syms).then(renderOpenPositions);
+    }
     renderOpenPositions();
   }
 
@@ -4641,6 +4695,11 @@
     document.getElementById('practiceOpenTable').style.display      = view === 'list' ? '' : 'none';
     document.getElementById('practiceAnalysisHeader').style.display = view === 'analysis' ? 'grid' : 'none';
     document.getElementById('practiceAnalysisTable').style.display  = view === 'analysis' ? '' : 'none';
+    if (view === 'analysis') {
+      const acc = getCurrentAccount();
+      const syms = acc ? [...new Set(acc.open.map(p => p.sym))] : [];
+      loadSignalsIntoStockData(syms).then(renderPractice);
+    }
     renderPractice();
   }
 
