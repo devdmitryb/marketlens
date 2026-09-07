@@ -73,11 +73,15 @@ async function collectScreenerFeed() {
 // Instead of refreshing every symbol in one bulk loop every 2h, we process ONE
 // symbol per minute from a rolling queue. Each symbol is refreshed roughly every
 // (queue length) minutes — ~100 symbols → ~100 min per symbol — which spreads FMP
-// load out evenly instead of bursting. The queue is (re)built on startup, whenever
-// it drains, and on demand after a user changes their watchlist/portfolio/practice.
+// load out evenly instead of bursting. The queue (re)builds itself automatically
+// on startup and whenever it drains — nothing else should trigger a rebuild, or
+// with many users constantly mutating their watchlist/portfolio/practice the
+// queue would keep resetting instead of ever finishing a cycle.
 let refreshQueue    = [];   // symbols still to process this cycle
 let refreshHoldings = [];   // snapshot of every user's holdings, for signal-change alerts
 let refreshingNow   = false; // guards against overlapping minute ticks
+let queueCycleTotal     = 0; // symbols in the current refresh cycle (set on (re)build)
+let queueCycleProcessed = 0; // symbols refreshed so far this cycle, for progress logging
 
 // Build the queue = union of every symbol any user tracks (watchlist + open
 // portfolio + open practice), and snapshot holdings so we know who to alert.
@@ -113,11 +117,13 @@ async function buildRefreshQueue() {
 
   refreshHoldings = holdings;
   refreshQueue = [...new Set(holdings.flatMap(h => [...h.watchlist, ...h.portfolioSyms, ...h.practiceSyms]))];
-  console.log(`[cron] Refresh queue built: ${refreshQueue.length} symbols across ${holdings.length} users`);
+  queueCycleTotal = refreshQueue.length;
+  queueCycleProcessed = 0;
+  console.log(`[cron] Queue rebuilt: ${refreshQueue.length} symbols across ${holdings.length} users`);
 }
 
-// Exposed so index.js can rebuild the queue right after a user mutates their
-// watchlist/portfolio/practice, so newly-added symbols enter the rotation promptly.
+// Only called from the startup sequence (see startCronJobs below) — the queue
+// otherwise rebuilds itself when it drains, so nothing else needs to call this.
 async function rebuildRefreshQueue() {
   await buildRefreshQueue();
 }
@@ -133,10 +139,15 @@ async function refreshNextSymbol() {
       if (!refreshQueue.length) return; // no symbols tracked by anyone yet
     }
     const sym = refreshQueue.shift();
+    queueCycleProcessed++;
     try {
       await refreshSymbol(sym, refreshHoldings);
+      console.log(`[cron] Refreshed ${sym} (${queueCycleProcessed}/${queueCycleTotal})`);
     } catch(e) {
       console.error(`[cron] Error refreshing ${sym}:`, e.message);
+    }
+    if (queueCycleProcessed >= queueCycleTotal) {
+      console.log(`[cron] Queue cycle complete: ${queueCycleTotal} symbols refreshed`);
     }
   } finally {
     refreshingNow = false;
@@ -667,7 +678,7 @@ function startCronJobs() {
     await sleep(5000);
     await refreshBenchmarkSymbols();
     await sleep(5000);
-    await buildRefreshQueue();
+    await rebuildRefreshQueue();
   }, 3000);
 }
 
