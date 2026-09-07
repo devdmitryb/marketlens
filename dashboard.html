@@ -3631,6 +3631,11 @@
   // Independent 30-day history for the Volume Signal section, decoupled from chartCache
   // so the signal never changes depending on which chart period (1M/3M/6M/1Y) is selected
   let volSignalCache = {}; // sym -> fixed 30-day historical data
+  // Cache for the recent-grades list's per-date price lookup — one shared history array
+  // per symbol (spanning back to the oldest date needed) instead of a separate
+  // /api/history call per grade date. See fetchGradeHistory() below.
+  let gradeHistCache = {}; // sym -> { ts, oldestDate, data }
+  const GRADE_HIST_TTL = 60 * 60 * 1000; // 1 hour
   // Set as a side effect of computeVolSignalHTML() — one of 'confirmed' | 'pullback' | 'weak' | 'selling' | null.
   // Read by renderCombinedSignalHTML() so the Combined Signal section stays in sync
   // with whatever window the Volume Signal section last computed.
@@ -3739,6 +3744,22 @@
       }
     }
 
+    // Same symbol, same 30-day window as the drawer's default 1M chart (loadChart) —
+    // reuse its cache instead of firing a duplicate /api/history call
+    if (!history) {
+      let chartHist = chartCache[`${sym}_30`];
+      if (chartHist && !isChartDataFresh(chartHist)) chartHist = null;
+      if (!chartHist) {
+        const cachedChart = cacheGet(`chart_${sym}_30`, 'target');
+        if (cachedChart && isChartDataFresh(cachedChart)) chartHist = cachedChart;
+      }
+      if (chartHist) {
+        history = chartHist;
+        volSignalCache[sym] = history;
+        cacheSet(`volhist_${sym}`, history);
+      }
+    }
+
     if (!history) {
       try {
         const from    = new Date(); from.setDate(from.getDate() - 30);
@@ -3760,6 +3781,10 @@
         if (history.length) {
           volSignalCache[sym] = history;
           cacheSet(`volhist_${sym}`, history);
+          // Share with the 1M chart cache — same symbol/window, avoids loadChart()
+          // making a duplicate fetch for what is the same request
+          chartCache[`${sym}_30`] = history;
+          cacheSet(`chart_${sym}_30`, history);
         }
       } catch(e) {
         return [];
@@ -3767,6 +3792,28 @@
     }
 
     return history || [];
+  }
+
+  // Single history fetch (from the oldest needed date through today) backing the
+  // recent-grades list's per-date price lookup, replacing what used to be one
+  // /api/history call per grade date. Cached briefly in-memory since the drawer
+  // may re-render (e.g. chart period switches) without needing a refetch.
+  async function fetchGradeHistory(sym, oldestDate) {
+    const cached = gradeHistCache[sym];
+    if (cached && cached.oldestDate <= oldestDate && (Date.now() - cached.ts) < GRADE_HIST_TTL) {
+      return cached.data;
+    }
+    try {
+      const res = await fetch(`${SERVER_URL}/api/history/${sym}?from=${oldestDate}`, {
+        headers: { 'x-app-token': APP_TOKEN }
+      });
+      const data = await res.json();
+      const history = Array.isArray(data) ? data : [];
+      gradeHistCache[sym] = { ts: Date.now(), oldestDate, data: history };
+      return history;
+    } catch(e) {
+      return [];
+    }
   }
 
   async function loadChart(sym, days, btnEl) {
@@ -3795,6 +3842,22 @@
       }
     }
 
+    // The default 1M chart is the same request as the Volume Signal's 30-day
+    // history (fetchVolSignalHistory) — reuse it instead of a duplicate fetch
+    if (!history && days === 30) {
+      let volHist = volSignalCache[sym];
+      if (volHist && !isChartDataFresh(volHist)) volHist = null;
+      if (!volHist) {
+        const cachedVol = cacheGet(`volhist_${sym}`, 'target');
+        if (cachedVol && isChartDataFresh(cachedVol)) volHist = cachedVol;
+      }
+      if (volHist) {
+        history = volHist;
+        chartCache[cacheKey] = history;
+        cacheSet(`chart_${cacheKey}`, history);
+      }
+    }
+
     if (!history) {
       wrap.innerHTML = `<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:40px 0">Loading…</div>`;
       try {
@@ -3818,6 +3881,11 @@
         if (history.length) {
           chartCache[cacheKey] = history;
           cacheSet(`chart_${cacheKey}`, history);
+          // Share with the Volume Signal cache — same symbol/window
+          if (days === 30) {
+            volSignalCache[sym] = history;
+            cacheSet(`volhist_${sym}`, history);
+          }
         }
       } catch(e) {
         wrap.innerHTML = `<div style="color:var(--danger);font-size:0.78rem;text-align:center;padding:40px 0">Chart unavailable</div>`;
@@ -4225,27 +4293,24 @@
       const changeSign  = (quote?.changePercentage ?? 0) >= 0 ? '+' : '';
 
       // Recent grades list — sorted by date desc, last 10
-      // Fetch historical prices for each grade date
       const sortedGrades = [...grades].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 10);
 
-      // Fetch historical price for each unique date
+      // Fetch price history once, from the oldest grade date through today, and look up
+      // each grade's closing price client-side — one /api/history call instead of one
+      // per grade date (up to 10)
       const uniqueDates = [...new Set(sortedGrades.map(g => g.date))];
       const historicalPrices = {};
-      await Promise.all(uniqueDates.map(async date => {
-        try {
-          const r = await fetch(`${SERVER_URL}/api/history/${sym}?from=${date}`, {
-            headers: { 'x-app-token': APP_TOKEN }
-          });
-          const arr = await r.json();
-          // Find entry matching the target date, else nearest available (array is oldest-first)
-          const entry = Array.isArray(arr)
-            ? arr.find(r => r.date === date) || arr[0]
-            : null;
-          if (entry?.close) {
+      if (uniqueDates.length) {
+        const oldestDate = uniqueDates.reduce((min, d) => d < min ? d : min, uniqueDates[0]);
+        const gradeHistory = await fetchGradeHistory(sym, oldestDate);
+        uniqueDates.forEach(date => {
+          // Exact match, else nearest available on/after that date (array is oldest-first)
+          const entry = gradeHistory.find(r => r.date === date) || gradeHistory.find(r => r.date >= date);
+          if (entry?.close != null) {
             historicalPrices[date] = parseFloat(entry.close);
           }
-        } catch {}
-      }));
+        });
+      }
 
       const recentList = sortedGrades.map(g => {
         const d = new Date(g.date).toLocaleDateString('en-CA', { month:'short', day:'numeric', year:'2-digit' });
