@@ -7071,10 +7071,10 @@
           if (Array.isArray(serverSlog)) {
             signalLog = serverSlog.map(e => ({
               id:        e.id,
-              ts:        e.created_at,
-              sym:       e.symbol,
-              newSignal: e.new_signal,
-              oldSignal: e.old_signal,
+              ts:        e.ts,
+              sym:       e.sym,
+              newSignal: e.newSignal,
+              oldSignal: e.oldSignal,
               reason:    e.reason,
               source:    e.source || 'server',
             }));
