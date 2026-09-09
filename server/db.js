@@ -69,6 +69,8 @@ async function initSchema() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
 
+      ALTER TABLE signal_log ADD COLUMN IF NOT EXISTS price NUMERIC;
+
       CREATE TABLE IF NOT EXISTS signal_events (
         id            SERIAL PRIMARY KEY,
         symbol        TEXT NOT NULL,
@@ -384,13 +386,14 @@ async function getSignalLog(limit = 200) {
     oldSignal: r.old_signal,
     reason:    r.reason,
     source:    r.source,
+    price:     r.price,
   }));
 }
 
-async function addSignalLog(sym, newSignal, oldSignal, reason) {
+async function addSignalLog(sym, newSignal, oldSignal, reason, price) {
   await pool.query(
-    'INSERT INTO signal_log (symbol, new_signal, old_signal, reason) VALUES ($1, $2, $3, $4)',
-    [sym, newSignal, oldSignal, reason]
+    'INSERT INTO signal_log (symbol, new_signal, old_signal, reason, price) VALUES ($1, $2, $3, $4, $5)',
+    [sym, newSignal, oldSignal, reason, price]
   );
   // Keep only last 500 entries
   await pool.query(`
