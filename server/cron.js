@@ -83,8 +83,38 @@ let refreshingNow   = false; // guards against overlapping minute ticks
 let queueCycleTotal     = 0; // symbols in the current refresh cycle (set on (re)build)
 let queueCycleProcessed = 0; // symbols refreshed so far this cycle, for progress logging
 
+// "Hot Screener" — fresh, high-potential screener symbols get pulled into the
+// rolling refresh queue automatically, even if no user is tracking them yet, so
+// their signal/momentum data is warm by the time someone looks. They are ONLY
+// added to refreshQueue, never to refreshHoldings, so refreshSymbol()'s alert
+// logic (keyed off actual user watchlist/portfolio/practice membership) never
+// fires for them — see buildRefreshQueue() below.
+async function getHotScreenerSymbols() {
+  try {
+    const res = await db.pool.query(`
+      SELECT symbol, MAX(published_at) AS latest_published
+      FROM screener
+      WHERE published_at >= NOW() - INTERVAL '7 days'
+        AND (upside_data->>'upside')::numeric > 30
+        AND data->>'action' IN ('upgrade', 'init', 'initiated', 'reit')
+        AND (upside_data->>'marketCap')::numeric > 100000000
+        AND symbol IS NOT NULL
+      GROUP BY symbol
+      ORDER BY latest_published DESC
+      LIMIT 50
+    `);
+    const symbols = res.rows.map(r => r.symbol);
+    console.log(`[cron] Hot screener: found ${symbols.length} symbols matching criteria`);
+    return symbols;
+  } catch(e) {
+    console.error('[cron] getHotScreenerSymbols failed:', e.message);
+    return [];
+  }
+}
+
 // Build the queue = union of every symbol any user tracks (watchlist + open
-// portfolio + open practice), and snapshot holdings so we know who to alert.
+// portfolio + open practice), plus fresh hot-screener symbols nobody tracks yet,
+// and snapshot holdings (user symbols only) so we know who to alert.
 async function buildRefreshQueue() {
   let users;
   try {
@@ -116,10 +146,15 @@ async function buildRefreshQueue() {
   }
 
   refreshHoldings = holdings;
-  refreshQueue = [...new Set(holdings.flatMap(h => [...h.watchlist, ...h.portfolioSyms, ...h.practiceSyms]))];
+  const userSymbols = [...new Set(holdings.flatMap(h => [...h.watchlist, ...h.portfolioSyms, ...h.practiceSyms]))];
+
+  const userSymbolSet = new Set(userSymbols);
+  const hotScreenerSymbols = (await getHotScreenerSymbols()).filter(sym => !userSymbolSet.has(sym));
+
+  refreshQueue = [...userSymbols, ...hotScreenerSymbols];
   queueCycleTotal = refreshQueue.length;
   queueCycleProcessed = 0;
-  console.log(`[cron] Queue rebuilt: ${refreshQueue.length} symbols across ${holdings.length} users`);
+  console.log(`[cron] Queue rebuilt: ${userSymbols.length} user symbols + ${hotScreenerSymbols.length} hot screener symbols = ${refreshQueue.length} total`);
 }
 
 // Only called from the startup sequence (see startCronJobs below) — the queue
