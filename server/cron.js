@@ -384,7 +384,7 @@ async function refreshSymbol(sym, holdings) {
   // 8. Log change + email the holders/watchers who care
   if (prevSignal && prevSignal !== newSignal) {
     console.log(`[cron] Signal change: ${sym} ${prevSignal} → ${newSignal}`);
-    await logSignalChange(sym, newSignal, prevSignal, upside);
+    await logSignalChange(sym, newSignal, prevSignal, upside, quote?.price);
 
     for (const { user, watchlist, portfolioSyms, practiceSyms } of holdings) {
       const inPortfolio = portfolioSyms.includes(sym);
@@ -643,10 +643,10 @@ function isBuySignal(signal) {
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function logSignalChange(sym, newSignal, oldSignal, upside) {
+async function logSignalChange(sym, newSignal, oldSignal, upside, price) {
   const reason = `Upside: ${upside?.toFixed(1)}%`;
   try {
-    await db.addSignalLog(sym, newSignal, oldSignal, reason);
+    await db.addSignalLog(sym, newSignal, oldSignal, reason, price);
   } catch(e) {
     console.error(`[db] addSignalLog failed for ${sym}, falling back to store:`, e.message);
     const log = store.read('signal_log', []);
@@ -658,6 +658,7 @@ async function logSignalChange(sym, newSignal, oldSignal, upside) {
       oldSignal,
       reason,
       source:    'server',
+      price,
     });
     store.write('signal_log', log.slice(0, 500)); // keep last 500
   }
