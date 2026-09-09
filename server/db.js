@@ -413,7 +413,7 @@ async function addSignalEvent(symbol, eventType, signal, volumeSignal, price) {
   );
 }
 
-async function getSignalEvents(limit = 20, offset = 0, symbol = null) {
+async function getSignalEvents(limit = 100, offset = 0, symbol = null) {
   const params = symbol ? [symbol, limit, offset] : [limit, offset];
   const where  = symbol ? 'WHERE symbol = $1' : '';
   const res = await pool.query(
