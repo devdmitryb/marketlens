@@ -4550,10 +4550,12 @@
             'buy--wait':'signal-buy-wait','trim':'signal-trim',
             'sell':'signal-sell','sell--reversal':'signal-sell-reversal','wait':'signal-wait'
           }[sk] ?? 'signal-wait';
+          const priceStr = (e.price != null && !isNaN(e.price)) ? `$${Number(e.price).toFixed(2)}` : '';
           return `<div class="grade-item" style="gap:8px">
             <span class="grade-date-small">${d}</span>
             <span style="flex:1;font-size:0.72rem;color:var(--text-dim)">${(e.reason||'—').slice(0,40)}</span>
             <span class="signal ${sc}" style="font-size:0.62rem;padding:2px 6px">${e.newSignal}</span>
+            ${priceStr ? `<span style="font-size:0.68rem;color:var(--text-dim)">${priceStr}</span>` : ''}
           </div>`;
         }).join('');
         document.getElementById('drawerBody').innerHTML += `
@@ -7077,6 +7079,7 @@
               oldSignal: e.oldSignal,
               reason:    e.reason,
               source:    e.source || 'server',
+              price:     e.price,
             }));
             updateSlogBadge();
             renderSlog();
