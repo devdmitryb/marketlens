@@ -535,7 +535,7 @@ app.get('/api/signal-log', auth, async (req, res) => {
 
 // Signal events — permanent, paginated time-series log of key entry/exit signals
 app.get('/api/signal-events', auth, async (req, res) => {
-  const limit  = parseInt(req.query.limit) || 20;
+  const limit  = parseInt(req.query.limit) || 100;
   const offset = parseInt(req.query.offset) || 0;
   const symbol = req.query.symbol ? String(req.query.symbol).toUpperCase() : null;
   try {
