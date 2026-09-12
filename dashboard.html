@@ -2631,7 +2631,10 @@
       const raw = localStorage.getItem('cache_' + key);
       if (!raw) return null;
       const { ts, data } = JSON.parse(raw);
-      if (Date.now() - ts > getCacheTTL(type)) return null;
+      if (Date.now() - ts > getCacheTTL(type)) {
+        localStorage.removeItem('cache_' + key);
+        return null;
+      }
       return data;
     } catch { return null; }
   }
@@ -3806,7 +3809,6 @@
       if (chartHist) {
         history = chartHist;
         volSignalCache[sym] = history;
-        cacheSet(`volhist_${sym}`, history);
       }
     }
 
@@ -3830,7 +3832,6 @@
         }));
         if (history.length) {
           volSignalCache[sym] = history;
-          cacheSet(`volhist_${sym}`, history);
           // Share with the 1M chart cache — same symbol/window, avoids loadChart()
           // making a duplicate fetch for what is the same request
           chartCache[`${sym}_30`] = history;
@@ -3930,11 +3931,12 @@
         }));
         if (history.length) {
           chartCache[cacheKey] = history;
-          cacheSet(`chart_${cacheKey}`, history);
+          // Large periods (6M/1Y) are rarely needed after a reload — keep them
+          // in-memory only so localStorage doesn't accumulate huge OHLCV arrays
+          if (days === 30 || days === 90) cacheSet(`chart_${cacheKey}`, history);
           // Share with the Volume Signal cache — same symbol/window
           if (days === 30) {
             volSignalCache[sym] = history;
-            cacheSet(`volhist_${sym}`, history);
           }
         }
       } catch(e) {
