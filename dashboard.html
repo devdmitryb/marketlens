@@ -1317,6 +1317,73 @@
       transform: translateX(-50%);
     }
 
+    /* ── FULL CHART PAGE ── */
+    .chart-page-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+    #chartSymDropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      width: 280px;
+      max-width: 80vw;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+      z-index: 50;
+      max-height: 320px;
+      overflow-y: auto;
+      display: none;
+    }
+    #chartSymDropdown.open { display: block; }
+    .chart-pane {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .chart-pane-title {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    #chartPricePane { height: 460px; }
+    #chartActivityPane { height: 150px; }
+    #chartSignalPane { height: 160px; }
+    .cp-svg-wrap { width: 100%; height: calc(100% - 20px); position: relative; }
+    .cp-svg-wrap svg { width: 100%; height: 100%; overflow: visible; }
+    .cp-marker { cursor: pointer; }
+    .cp-tooltip {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--text);
+      z-index: 200;
+      display: none;
+      max-width: 280px;
+      white-space: normal;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+      pointer-events: none;
+    }
+    @media (max-width: 900px) {
+      #chartPricePane { height: 320px; }
+      #chartActivityPane { height: 130px; }
+      #chartSignalPane { height: 140px; }
+    }
+
     /* ── DETAIL DRAWER ── */
     .drawer-overlay {
       display: none;
@@ -1521,6 +1588,7 @@
     <button onclick="showPage('signalevents')" id="nav-signalevents">⚡ Events</button>
     <button onclick="showPage('practice')">Practice</button>
     <button onclick="showPage('backtest')">🔬 Backtest</button>
+    <button onclick="showPage('chart')">📈 Chart</button>
     <button onclick="showPage('admin')" id="nav-admin" style="display:none">🛡️ Admin</button>
   </nav>
   <div class="header-right">
@@ -1933,6 +2001,49 @@
         </table>
       </div>
     </div>
+
+  </div>
+
+  <!-- ═══ CHART PAGE ═══ -->
+  <div class="page" id="page-chart">
+
+    <div class="chart-page-toolbar">
+      <div id="chartSymWrapper" style="position:relative;min-width:160px">
+        <input type="text" id="chartSymInput" placeholder="Symbol — e.g. NVDA"
+          autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.9rem;padding:10px 14px;border-radius:8px;outline:none;width:100%;text-transform:uppercase"
+          oninput="onChartSymInput(this)"
+          onkeydown="onChartSymKeydown(event, this)"
+          onblur="onChartSymBlur(this)" />
+        <div id="chartSymDropdown" role="listbox"></div>
+      </div>
+      <button class="btn secondary" onclick="loadChartSymbolFromInput()">🔍 Load</button>
+      <div class="chart-periods" style="margin-bottom:0">
+        <button class="chart-period-btn" id="cp-182" onclick="setChartPeriod(182, this)">6M</button>
+        <button class="chart-period-btn active" id="cp-365" onclick="setChartPeriod(365, this)">1Y</button>
+        <button class="chart-period-btn" id="cp-730" onclick="setChartPeriod(730, this)">2Y</button>
+      </div>
+      <span id="chartCurrentSignalBadge" style="margin-left:auto;font-family:var(--mono);font-size:0.8rem;color:var(--text-dim)"></span>
+    </div>
+
+    <div id="chartPricePane" class="chart-pane">
+      <div class="chart-pane-title">Price &amp; Signals</div>
+      <div class="cp-svg-wrap" id="chartPriceWrap">
+        <div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to load its chart.</div>
+      </div>
+    </div>
+
+    <div id="chartActivityPane" class="chart-pane">
+      <div class="chart-pane-title">Analyst Activity</div>
+      <div class="cp-svg-wrap" id="chartActivityWrap"></div>
+    </div>
+
+    <div id="chartSignalPane" class="chart-pane">
+      <div class="chart-pane-title">Signal History</div>
+      <div class="cp-svg-wrap" id="chartSignalWrap"></div>
+    </div>
+
+    <div class="cp-tooltip" id="chartPageTooltip"></div>
 
   </div>
 
@@ -2358,6 +2469,9 @@
     }
     if (name === 'overview' && !overviewLoaded && serverAvailable) {
       loadOverview();
+    }
+    if (name === 'chart') {
+      initChartPage();
     }
   }
 
@@ -7038,6 +7152,563 @@
       if (newEntries.length) saveSignalLog();
 
     } catch(e) { console.error('Screener check error:', e); }
+  }
+
+  // ══════════════════════════════════════════
+  //  CHART PAGE — full-width symbol chart:
+  //  price+signals, analyst activity, signal history. All three SVG panes
+  //  share the same trading-day index → x-position scale (xScale over
+  //  `history`), so markers/bars/dots line up across sections without a
+  //  separate date-axis component.
+  // ══════════════════════════════════════════
+  let chartSym          = null;
+  let chartPeriod        = 365; // 182 (6M) | 365 (1Y) | 730 (2Y)
+  let chartPriceHist     = [];
+  let chartGrades        = [];
+  let chartSlogEntries   = [];
+  let chartPageHistCache = {}; // `${sym}_${days}` -> history array, in-memory only
+  // (no localStorage — large periods were deliberately dropped from the cache
+  // in ML-158 to fix localStorage bloat; this page only ever asks for 6M/1Y/2Y)
+  let chartLoadSeq       = 0;  // guards against an older fetch clobbering a newer one
+
+  const CHART_ANALYST_PALETTE = ['#3df5c1','#ff9f43','#54a0ff','#ff6b9d','#feca57','#a29bfe','#1dd1a1','#ff7675','#00d2d3','#e17055'];
+
+  function initChartPage() {
+    if (!chartSym) chartSym = watchlist[0] || null;
+    const input = document.getElementById('chartSymInput');
+    if (input) input.value = chartSym || '';
+    if (chartSym && serverAvailable) {
+      loadChartPage(chartSym, chartPeriod);
+    } else if (!chartSym) {
+      document.getElementById('chartPriceWrap').innerHTML =
+        `<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to load its chart.</div>`;
+    }
+  }
+
+  function loadChartSymbolFromInput() {
+    const input = document.getElementById('chartSymInput');
+    const sym = (input?.value || '').trim().toUpperCase();
+    if (!sym) return;
+    hideChartSymDropdown();
+    loadChartPage(sym, chartPeriod);
+  }
+
+  function setChartPeriod(days, btnEl) {
+    chartPeriod = days;
+    document.querySelectorAll('#page-chart .chart-period-btn').forEach(b => b.classList.remove('active'));
+    btnEl?.classList.add('active');
+    if (chartSym) loadChartPage(chartSym, days);
+  }
+
+  async function fetchChartHistory(sym, days) {
+    const key = `${sym}_${days}`;
+    if (chartPageHistCache[key] && isChartDataFresh(chartPageHistCache[key])) {
+      return chartPageHistCache[key];
+    }
+    const from = new Date(); from.setDate(from.getDate() - days);
+    const fromStr = from.toISOString().slice(0, 10);
+    const res  = await fetch(`${SERVER_URL}/api/history/${sym}?from=${fromStr}`, { headers: { 'x-app-token': APP_TOKEN } });
+    const data = await res.json();
+    const history = (Array.isArray(data) ? data : []).map(d => ({
+      ...d,
+      close:  parseFloat(d.close),
+      open:   parseFloat(d.open),
+      high:   parseFloat(d.high),
+      low:    parseFloat(d.low),
+      volume: parseInt(d.volume) || 0,
+    }));
+    chartPageHistCache[key] = history;
+    return history;
+  }
+
+  async function fetchChartGrades(sym) {
+    const res  = await fetch(`${SERVER_URL}/api/grades/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
+    const data = await res.json();
+    return Array.isArray(data) ? data : (data ? [data] : []);
+  }
+
+  async function fetchChartSignalLog(sym) {
+    const res  = await fetch(`${SERVER_URL}/api/signal-log?limit=500`, { headers: { 'x-app-token': APP_TOKEN } });
+    const data = await res.json();
+    return (Array.isArray(data) ? data : []).filter(e => e.sym === sym);
+  }
+
+  async function fetchChartCurrentSignal(sym) {
+    if (stockData[sym]) {
+      try { return calcSignal(stockData[sym]); } catch(e) { /* fall through to server */ }
+    }
+    try {
+      const res = await fetch(`${SERVER_URL}/api/signals/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return { signal: data.signal, reason: data.reason };
+    } catch(e) { return null; }
+  }
+
+  async function loadChartPage(sym, days) {
+    if (!serverAvailable) { toast('Server unreachable, please try again.', 'error'); return; }
+    sym = sym.toUpperCase();
+    chartSym    = sym;
+    chartPeriod = days;
+    const input = document.getElementById('chartSymInput');
+    if (input) input.value = sym;
+    const seq = ++chartLoadSeq;
+
+    document.getElementById('chartPriceWrap').innerHTML =
+      `<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Loading…</div>`;
+    document.getElementById('chartActivityWrap').innerHTML = '';
+    document.getElementById('chartSignalWrap').innerHTML   = '';
+    const badge = document.getElementById('chartCurrentSignalBadge');
+    if (badge) badge.textContent = '';
+
+    try {
+      const [history, grades, slog, signalInfo] = await Promise.all([
+        fetchChartHistory(sym, days),
+        fetchChartGrades(sym),
+        fetchChartSignalLog(sym),
+        fetchChartCurrentSignal(sym),
+      ]);
+      if (seq !== chartLoadSeq) return; // a newer request superseded this one
+
+      chartPriceHist   = history;
+      chartGrades      = grades;
+      chartSlogEntries = slog;
+
+      if (badge && signalInfo?.signal) {
+        const isBuy  = /BUY/.test(signalInfo.signal);
+        const isSell = /SELL|TRIM/.test(signalInfo.signal);
+        badge.style.color = isBuy ? 'var(--accent2)' : isSell ? 'var(--danger)' : 'var(--text-dim)';
+        badge.textContent = `Signal: ${signalInfo.signal}`;
+      }
+
+      if (!history.length) {
+        document.getElementById('chartPriceWrap').innerHTML =
+          `<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">No price data for ${escapeHtml(sym)}.</div>`;
+        return;
+      }
+
+      renderChartPricePane(history, grades, slog, sym);
+      renderChartActivityPane(history, grades);
+      renderChartSignalPane(history, slog);
+    } catch(e) {
+      if (seq !== chartLoadSeq) return;
+      document.getElementById('chartPriceWrap').innerHTML =
+        `<div style="color:var(--danger);font-size:0.78rem;text-align:center;padding:60px 0">Failed to load chart: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  // ── Symbol search (self-contained copy of the header's quick-symbol search,
+  // scoped to the Chart page's own input/dropdown/state so the two never interfere) ──
+  let chartSymSearchResults  = [];
+  let chartSymSearchActive   = -1;
+  let chartSymSearchDebounce = null;
+  let chartSymSearchSeq      = 0;
+
+  function onChartSymInput(el) {
+    el.value = el.value.toUpperCase();
+    const q = el.value.trim();
+    clearTimeout(chartSymSearchDebounce);
+    if (q.length < 2) { hideChartSymDropdown(); return; }
+    chartSymSearchDebounce = setTimeout(() => fetchChartSymbolSearch(q), 300);
+  }
+
+  async function fetchChartSymbolSearch(q) {
+    if (serverAvailable === false) return;
+    const seq = ++chartSymSearchSeq;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/search?q=${encodeURIComponent(q)}`, {
+        headers: { 'x-app-token': APP_TOKEN }
+      });
+      if (!res.ok) return;
+      const results = await res.json();
+      if (seq !== chartSymSearchSeq) return;
+      const el = document.getElementById('chartSymInput');
+      if (!el || el.value.trim().length < 2) { hideChartSymDropdown(); return; }
+      renderChartSymDropdown(Array.isArray(results) ? results : []);
+    } catch { /* network error — silently ignore; Enter-to-load still works */ }
+  }
+
+  function renderChartSymDropdown(results) {
+    const dd = document.getElementById('chartSymDropdown');
+    if (!dd) return;
+    chartSymSearchResults = results.slice(0, 8);
+    chartSymSearchActive  = -1;
+    if (!chartSymSearchResults.length) {
+      dd.innerHTML = `<div class="qs-empty">No matches</div>`;
+      dd.classList.add('open');
+      return;
+    }
+    dd.innerHTML = chartSymSearchResults.map((r, i) => `
+      <div class="qs-item" role="option" data-idx="${i}"
+        onmousedown="event.preventDefault()"
+        onclick="selectChartSymResult(${i})">
+        <span class="qs-sym">${escapeHtml(r.symbol || '')}</span>
+        <span class="qs-name">${escapeHtml(r.name || '')}</span>
+        <span class="qs-exch">${escapeHtml(r.exchange || '')}</span>
+      </div>`).join('');
+    dd.classList.add('open');
+  }
+
+  function hideChartSymDropdown() {
+    const dd = document.getElementById('chartSymDropdown');
+    if (dd) { dd.classList.remove('open'); dd.innerHTML = ''; }
+    chartSymSearchResults = [];
+    chartSymSearchActive  = -1;
+  }
+
+  function setChartSymActive(idx) {
+    const dd = document.getElementById('chartSymDropdown');
+    if (!dd) return;
+    const items = dd.querySelectorAll('.qs-item');
+    if (!items.length) return;
+    chartSymSearchActive = (idx + items.length) % items.length;
+    items.forEach((it, i) => it.classList.toggle('active', i === chartSymSearchActive));
+    items[chartSymSearchActive].scrollIntoView({ block: 'nearest' });
+  }
+
+  function selectChartSymResult(idx) {
+    const r = chartSymSearchResults[idx];
+    if (!r) return;
+    hideChartSymDropdown();
+    loadChartPage(r.symbol, chartPeriod);
+  }
+
+  function onChartSymKeydown(e, el) {
+    const dd   = document.getElementById('chartSymDropdown');
+    const open = dd && dd.classList.contains('open') && chartSymSearchResults.length > 0;
+    if (e.key === 'ArrowDown' && open) { e.preventDefault(); setChartSymActive(chartSymSearchActive + 1); return; }
+    if (e.key === 'ArrowUp'   && open) { e.preventDefault(); setChartSymActive(chartSymSearchActive - 1); return; }
+    if (e.key === 'Escape') { hideChartSymDropdown(); return; }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (open && chartSymSearchActive >= 0) {
+        selectChartSymResult(chartSymSearchActive);
+      } else if (el.value.trim()) {
+        hideChartSymDropdown();
+        loadChartPage(el.value.trim(), chartPeriod);
+      }
+    }
+  }
+
+  function onChartSymBlur(el) {
+    setTimeout(() => hideChartSymDropdown(), 150);
+  }
+
+  // ── Tooltip (shared by all three panes — click a marker/bar/dot to show it) ──
+  function escapeJs(str) {
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, ' ');
+  }
+
+  function showChartTooltip(evt, text) {
+    evt.stopPropagation();
+    const tip = document.getElementById('chartPageTooltip');
+    if (!tip) return;
+    tip.textContent = text;
+    tip.style.display = 'block';
+    const gap = 12;
+    let left = evt.clientX + gap;
+    let top  = evt.clientY + gap;
+    if (left + 280 > window.innerWidth)  left = evt.clientX - 280 - gap;
+    if (top + 60 > window.innerHeight)   top  = evt.clientY - 60 - gap;
+    tip.style.left = `${Math.max(4, left)}px`;
+    tip.style.top  = `${Math.max(4, top)}px`;
+    clearTimeout(tip._hideTimer);
+    tip._hideTimer = setTimeout(() => { tip.style.display = 'none'; }, 4000);
+  }
+  document.addEventListener('click', () => {
+    const tip = document.getElementById('chartPageTooltip');
+    if (tip) tip.style.display = 'none';
+  });
+
+  // Nearest trading-day index in `history` for an arbitrary calendar date
+  // (grade/signal dates don't always land on a trading day) — snaps to the
+  // closest bar so markers still line up with the price line.
+  function nearestHistIndex(history, dateStr) {
+    const target = parseHistoryDate(dateStr);
+    if (!target || !history.length) return null;
+    let best = 0, bestDiff = Infinity;
+    for (let i = 0; i < history.length; i++) {
+      const hd = parseHistoryDate(history[i].date);
+      if (!hd) continue;
+      const diff = Math.abs(hd - target);
+      if (diff < bestDiff) { bestDiff = diff; best = i; }
+    }
+    return best;
+  }
+
+  // Turns raw grade rows into per-analyst horizontal target-price segments:
+  // one segment per (company, priceTarget) pair, running from the date it was
+  // set until the company's next target change (or the end of the chart).
+  // Grades without a priceTarget are skipped — some FMP plans/endpoints don't
+  // return one, in which case this simply renders no target lines.
+  function buildAnalystTargetLines(grades, history) {
+    if (!Array.isArray(grades) || !grades.length || !history.length) return [];
+    const chartStart = parseHistoryDate(history[0].date);
+    const chartEnd    = parseHistoryDate(history[history.length - 1].date);
+    if (!chartStart || !chartEnd) return [];
+
+    const byCompany = {};
+    grades.forEach(g => {
+      const pt = parseFloat(g.priceTarget);
+      if (!g.date || isNaN(pt)) return;
+      const co = g.gradingCompany || g.analystName || 'Analyst';
+      (byCompany[co] = byCompany[co] || []).push({ date: g.date, price: pt });
+    });
+
+    const lines = [];
+    Object.entries(byCompany).forEach(([co, arr]) => {
+      arr.sort((a, b) => (parseHistoryDate(a.date) || 0) - (parseHistoryDate(b.date) || 0));
+      arr.forEach((g, i) => {
+        const startD = parseHistoryDate(g.date);
+        if (!startD) return;
+        const next = arr[i + 1];
+        const endD = next ? (parseHistoryDate(next.date) || chartEnd) : chartEnd;
+        if (endD < chartStart || startD > chartEnd) return; // segment outside visible range
+        const clampedStartDate = startD < chartStart ? history[0].date : g.date;
+        const clampedEndDate   = next ? next.date : history[history.length - 1].date;
+        const startIdx = nearestHistIndex(history, clampedStartDate);
+        const endIdx   = nearestHistIndex(history, clampedEndDate);
+        if (startIdx === null || endIdx === null || startIdx === endIdx) return;
+        lines.push({
+          company: co,
+          price: g.price,
+          startIdx, endIdx,
+          startDateLabel: (parseHistoryDate(g.date) || new Date(g.date)).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }),
+        });
+      });
+    });
+    return lines;
+  }
+
+  // ── Section 1: price line + area fill, BUY/SELL signal triangles, analyst target lines ──
+  function renderChartPricePane(history, grades, slogEntries, sym) {
+    const wrap = document.getElementById('chartPriceWrap');
+    if (!wrap || !history.length) return;
+
+    const W = wrap.offsetWidth || 900;
+    const H = wrap.offsetHeight || 400;
+    const pad = { top: 20, right: 56, bottom: 26, left: 54 };
+    const iW = W - pad.left - pad.right;
+    const iH = H - pad.top - pad.bottom;
+
+    const lastIdx = history.length - 1;
+    const denom   = lastIdx || 1;
+    const xScale  = i => pad.left + (i / denom) * iW;
+
+    const targetLines = buildAnalystTargetLines(grades, history);
+
+    const prices  = history.map(d => d.close);
+    const allVals = [...prices, ...targetLines.map(l => l.price)];
+    let minP = Math.min(...allVals);
+    let maxP = Math.max(...allVals);
+    if (minP === maxP) { minP -= 1; maxP += 1; }
+    const vPad = (maxP - minP) * 0.06;
+    minP -= vPad; maxP += vPad;
+    const range  = maxP - minP || 1;
+    const yScale = p => pad.top + iH - ((p - minP) / range) * iH;
+
+    const points = history.map((d, i) => `${xScale(i).toFixed(1)},${yScale(d.close).toFixed(1)}`).join(' ');
+    const firstX = xScale(0).toFixed(1);
+    const lastX  = xScale(lastIdx).toFixed(1);
+    const baseY  = (pad.top + iH).toFixed(1);
+    const areaPath = `M${firstX},${baseY} ` +
+      history.map((d, i) => `L${xScale(i).toFixed(1)},${yScale(d.close).toFixed(1)}`).join(' ') +
+      ` L${lastX},${baseY} Z`;
+
+    const isUp   = prices[lastIdx] >= prices[0];
+    const colour = isUp ? 'var(--accent2)' : 'var(--danger)';
+    const fillId = `cpGrad_${sym}`;
+
+    const yLabels = [minP, minP + range / 2, maxP].map(v =>
+      `<text x="${(pad.left - 6).toFixed(0)}" y="${yScale(v).toFixed(0)}" text-anchor="end" fill="var(--muted)" font-size="9" dominant-baseline="middle">$${v.toFixed(2)}</text>`
+    ).join('');
+
+    const xIdxs = [...new Set([0, Math.round(lastIdx * 0.25), Math.round(lastIdx * 0.5), Math.round(lastIdx * 0.75), lastIdx])];
+    const xLabels = xIdxs.map(i => {
+      const d = (parseHistoryDate(history[i].date) || new Date(history[i].date))
+        .toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: '2-digit' });
+      const anchor = i === 0 ? 'start' : (i === lastIdx ? 'end' : 'middle');
+      return `<text x="${xScale(i).toFixed(0)}" y="${(pad.top + iH + 16).toFixed(0)}" text-anchor="${anchor}" fill="var(--muted)" font-size="9">${d}</text>`;
+    }).join('');
+
+    const companies = [...new Set(targetLines.map(l => l.company))];
+    const colorOf    = co => CHART_ANALYST_PALETTE[companies.indexOf(co) % CHART_ANALYST_PALETTE.length];
+    const targetSvg = targetLines.map(l => {
+      const x1 = xScale(l.startIdx).toFixed(1);
+      const x2 = xScale(l.endIdx).toFixed(1);
+      const y  = yScale(l.price).toFixed(1);
+      const color = colorOf(l.company);
+      const labelPlain = `$${l.price.toFixed(0)} ${l.company} (${l.startDateLabel})`;
+      return `
+        <g class="cp-marker" onclick="showChartTooltip(event, '${escapeJs(labelPlain)}')">
+          <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${color}" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.85"/>
+          <text x="${(parseFloat(x1) + 4).toFixed(0)}" y="${(parseFloat(y) - 4).toFixed(0)}" fill="${color}" font-size="8.5" font-weight="600">${escapeHtml(labelPlain)}</text>
+        </g>`;
+    }).join('');
+
+    const markerSvg = slogEntries.map(e => {
+      const sig    = e.newSignal || '';
+      const isBuy  = /BUY/.test(sig) && /CONFIRMED/.test(sig);
+      const isSell = /SELL|TRIM/.test(sig);
+      if (!isBuy && !isSell) return '';
+      const idx = nearestHistIndex(history, e.ts);
+      if (idx === null) return '';
+      const x = xScale(idx);
+      const y = yScale(history[idx].close);
+      const color = isBuy ? 'var(--accent2)' : 'var(--danger)';
+      const tri = isBuy
+        ? `M${(x - 5).toFixed(1)},${(y + 8).toFixed(1)} L${(x + 5).toFixed(1)},${(y + 8).toFixed(1)} L${x.toFixed(1)},${(y - 2).toFixed(1)} Z`
+        : `M${(x - 5).toFixed(1)},${(y - 8).toFixed(1)} L${(x + 5).toFixed(1)},${(y - 8).toFixed(1)} L${x.toFixed(1)},${(y + 2).toFixed(1)} Z`;
+      const dateLabel = (parseHistoryDate(e.ts) || new Date(e.ts)).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+      const tipPlain  = `${sig} — ${dateLabel}${e.price != null ? ' @ $' + Number(e.price).toFixed(2) : ''}`;
+      return `<path class="cp-marker" d="${tri}" fill="${color}" stroke="var(--bg)" stroke-width="0.5" onclick="showChartTooltip(event, '${escapeJs(tipPlain)}')"/>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
+        <defs>
+          <linearGradient id="${fillId}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${colour}" stop-opacity="0.22"/>
+            <stop offset="100%" stop-color="${colour}" stop-opacity="0.02"/>
+          </linearGradient>
+        </defs>
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + iH}" stroke="var(--border)" stroke-width="1"/>
+        <line x1="${pad.left}" y1="${pad.top + iH}" x2="${pad.left + iW}" y2="${pad.top + iH}" stroke="var(--border)" stroke-width="1"/>
+        <path d="${areaPath}" fill="url(#${fillId})"/>
+        ${targetSvg}
+        <polyline points="${points}" fill="none" stroke="${colour}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+        ${markerSvg}
+        <circle cx="${lastX}" cy="${yScale(prices[lastIdx]).toFixed(1)}" r="3.5" fill="${colour}"/>
+        <text x="${(parseFloat(lastX) + 6).toFixed(0)}" y="${yScale(prices[lastIdx]).toFixed(0)}"
+          text-anchor="start" dominant-baseline="middle" fill="${colour}" font-size="10" font-weight="700">$${prices[lastIdx].toFixed(2)}</text>
+        ${yLabels}${xLabels}
+      </svg>`;
+  }
+
+  // ── Section 2: per-date analyst activity bars (buy/hold above midline, sell below) ──
+  function renderChartActivityPane(history, grades) {
+    const wrap = document.getElementById('chartActivityWrap');
+    if (!wrap) return;
+    if (!history.length) { wrap.innerHTML = ''; return; }
+
+    const W = wrap.offsetWidth || 900;
+    const H = wrap.offsetHeight || 120;
+    const pad = { top: 14, right: 56, bottom: 18, left: 54 };
+    const iW  = W - pad.left - pad.right;
+    const iH  = H - pad.top  - pad.bottom;
+    const midY   = pad.top + iH * 0.6;
+    const aboveH = iH * 0.6;
+    const belowH = iH * 0.4;
+
+    const lastIdx = history.length - 1;
+    const denom   = lastIdx || 1;
+    const xScale  = i => pad.left + (i / denom) * iW;
+
+    const chartStart = parseHistoryDate(history[0].date);
+    const chartEnd    = parseHistoryDate(history[lastIdx].date);
+    const buckets = {}; // idx -> { buy, hold, sell }
+    grades.forEach(g => {
+      const d = parseHistoryDate(g.date);
+      if (!d || d < chartStart || d > chartEnd) return;
+      const idx = nearestHistIndex(history, g.date);
+      if (idx === null) return;
+      const b = buckets[idx] = buckets[idx] || { buy: 0, hold: 0, sell: 0 };
+      if (g.action === 'upgrade' || g.action === 'initialise') b.buy++;
+      else if (g.action === 'downgrade') b.sell++;
+      else b.hold++;
+    });
+
+    const maxCount = Math.max(1, ...Object.values(buckets).flatMap(b => [b.buy, b.hold, b.sell]));
+    const barW = Math.max(2, Math.min(9, (iW / (lastIdx + 1)) * 0.7));
+
+    const bars = Object.entries(buckets).map(([idxStr, b]) => {
+      const idx = parseInt(idxStr, 10);
+      const x = xScale(idx);
+      let svg = '';
+      if (b.buy > 0) {
+        const h  = (b.buy / maxCount) * aboveH;
+        const bx = x - barW * 0.65;
+        svg += `<rect x="${(bx - barW / 2).toFixed(1)}" y="${(midY - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--accent2)" rx="1"/>
+          <text x="${bx.toFixed(1)}" y="${(midY - h - 3).toFixed(1)}" text-anchor="middle" fill="var(--accent2)" font-size="7.5" font-weight="700">${b.buy}</text>`;
+      }
+      if (b.hold > 0) {
+        const h  = (b.hold / maxCount) * aboveH * 0.55; // deliberately shorter, per spec
+        const hx = x + barW * 0.65;
+        svg += `<rect x="${(hx - barW / 2).toFixed(1)}" y="${(midY - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--muted)" rx="1" opacity="0.8"/>
+          <text x="${hx.toFixed(1)}" y="${(midY - h - 3).toFixed(1)}" text-anchor="middle" fill="var(--muted)" font-size="7">${b.hold}</text>`;
+      }
+      if (b.sell > 0) {
+        const h = (b.sell / maxCount) * belowH;
+        svg += `<rect x="${(x - barW / 2).toFixed(1)}" y="${midY.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--danger)" rx="1"/>
+          <text x="${x.toFixed(1)}" y="${(midY + h + 9).toFixed(1)}" text-anchor="middle" fill="var(--danger)" font-size="7.5" font-weight="700">${b.sell}</text>`;
+      }
+      return svg;
+    }).join('');
+
+    const xIdxs = [...new Set([0, Math.round(lastIdx * 0.5), lastIdx])];
+    const xLabels = xIdxs.map(i => {
+      const d = (parseHistoryDate(history[i].date) || new Date(history[i].date)).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: '2-digit' });
+      const anchor = i === 0 ? 'start' : (i === lastIdx ? 'end' : 'middle');
+      return `<text x="${xScale(i).toFixed(0)}" y="${(pad.top + iH + 13).toFixed(0)}" text-anchor="${anchor}" fill="var(--muted)" font-size="9">${d}</text>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
+        <line x1="${pad.left}" y1="${midY.toFixed(1)}" x2="${pad.left + iW}" y2="${midY.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+        ${bars}
+        ${xLabels}
+      </svg>`;
+  }
+
+  // ── Section 3: horizontal signal-change timeline, dots colored by direction ──
+  function renderChartSignalPane(history, slogEntries) {
+    const wrap = document.getElementById('chartSignalWrap');
+    if (!wrap) return;
+    if (!history.length) { wrap.innerHTML = ''; return; }
+
+    const W = wrap.offsetWidth || 900;
+    const H = wrap.offsetHeight || 130;
+    const pad = { top: 34, right: 56, bottom: 34, left: 54 };
+    const iW  = W - pad.left - pad.right;
+    const midY = pad.top + (H - pad.top - pad.bottom) / 2;
+
+    const lastIdx = history.length - 1;
+    const denom   = lastIdx || 1;
+    const xScale  = i => pad.left + (i / denom) * iW;
+
+    const chartStart = parseHistoryDate(history[0].date);
+    const chartEnd    = parseHistoryDate(history[lastIdx].date);
+
+    const dots = slogEntries
+      .filter(e => {
+        const d = parseHistoryDate(e.ts);
+        return d && d >= chartStart && d <= chartEnd;
+      })
+      .map(e => {
+        const idx = nearestHistIndex(history, e.ts);
+        if (idx === null) return '';
+        const x = xScale(idx);
+        const sig    = e.newSignal || '';
+        const isBuy  = /BUY/.test(sig);
+        const isSell = /SELL|TRIM/.test(sig);
+        const color  = isBuy ? 'var(--accent2)' : isSell ? 'var(--danger)' : 'var(--text-dim)';
+        const dateLabel  = (parseHistoryDate(e.ts) || new Date(e.ts)).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+        const priceLabel = e.price != null ? `$${Number(e.price).toFixed(2)}` : '';
+        const tipPlain = `${sig}${e.oldSignal ? ' (was ' + e.oldSignal + ')' : ''} — ${dateLabel}${priceLabel ? ' @ ' + priceLabel : ''}`;
+        return `
+          <g class="cp-marker" onclick="showChartTooltip(event, '${escapeJs(tipPlain)}')">
+            <text x="${x.toFixed(1)}" y="${(midY - 14).toFixed(1)}" text-anchor="middle" fill="${color}" font-size="8" font-weight="700">${escapeHtml(sig)}</text>
+            <circle cx="${x.toFixed(1)}" cy="${midY.toFixed(1)}" r="5" fill="${color}" stroke="var(--bg)" stroke-width="1.5"/>
+            <text x="${x.toFixed(1)}" y="${(midY + 18).toFixed(1)}" text-anchor="middle" fill="var(--text-dim)" font-size="8">${priceLabel}</text>
+            <text x="${x.toFixed(1)}" y="${(midY + 30).toFixed(1)}" text-anchor="middle" fill="var(--muted)" font-size="7.5">${dateLabel}</text>
+          </g>`;
+      }).join('');
+
+    wrap.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
+        <line x1="${pad.left}" y1="${midY.toFixed(1)}" x2="${pad.left + iW}" y2="${midY.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+        ${dots || `<text x="${(pad.left + iW / 2).toFixed(0)}" y="${midY.toFixed(0)}" text-anchor="middle" fill="var(--muted)" font-size="10">No signal changes in this period</text>`}
+      </svg>`;
   }
 
   // ══════════════════════════════════════════
