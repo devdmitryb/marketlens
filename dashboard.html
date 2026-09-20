@@ -2030,7 +2030,7 @@
     <div id="chartPricePane" class="chart-pane">
       <div class="chart-pane-title">Price &amp; Signals</div>
       <div class="cp-svg-wrap" id="chartPriceWrap">
-        <div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to load its chart.</div>
+        <div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to view chart</div>
       </div>
     </div>
 
@@ -7174,15 +7174,17 @@
 
   const CHART_ANALYST_PALETTE = ['#3df5c1','#ff9f43','#54a0ff','#ff6b9d','#feca57','#a29bfe','#1dd1a1','#ff7675','#00d2d3','#e17055'];
 
+  // No default symbol and no auto-load here — the page opens empty (just the
+  // input + placeholder) and only fetches once the user explicitly enters or
+  // selects a symbol (loadChartSymbolFromInput / setChartPeriod / the search
+  // dropdown). If a symbol was already loaded earlier in this session,
+  // re-opening the page leaves that render in place rather than re-fetching.
   function initChartPage() {
-    if (!chartSym) chartSym = watchlist[0] || null;
-    const input = document.getElementById('chartSymInput');
-    if (input) input.value = chartSym || '';
-    if (chartSym && serverAvailable) {
-      loadChartPage(chartSym, chartPeriod);
-    } else if (!chartSym) {
+    if (!chartSym) {
+      const input = document.getElementById('chartSymInput');
+      if (input) input.value = '';
       document.getElementById('chartPriceWrap').innerHTML =
-        `<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to load its chart.</div>`;
+        `<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to view chart</div>`;
     }
   }
 
