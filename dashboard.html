@@ -1342,7 +1342,7 @@
     }
     #chartSymDropdown.open { display: block; }
     .chart-pane {
-      background: var(--surface);
+      background: #161b2e;
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 14px 16px;
@@ -2018,6 +2018,7 @@
         <div id="chartSymDropdown" role="listbox"></div>
       </div>
       <button class="btn secondary" onclick="loadChartSymbolFromInput()">🔍 Load</button>
+      <button class="btn secondary" onclick="if (chartSym) openDrawer(chartSym)">Open Drawer →</button>
       <div class="chart-periods" style="margin-bottom:0">
         <button class="chart-period-btn" id="cp-182" onclick="setChartPeriod(182, this)">6M</button>
         <button class="chart-period-btn active" id="cp-365" onclick="setChartPeriod(365, this)">1Y</button>
@@ -2029,7 +2030,7 @@
     <div id="chartPricePane" class="chart-pane">
       <div class="chart-pane-title">Price &amp; Signals</div>
       <div class="cp-svg-wrap" id="chartPriceWrap">
-        <div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to load its chart.</div>
+        <div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to view chart</div>
       </div>
     </div>
 
@@ -7173,15 +7174,17 @@
 
   const CHART_ANALYST_PALETTE = ['#3df5c1','#ff9f43','#54a0ff','#ff6b9d','#feca57','#a29bfe','#1dd1a1','#ff7675','#00d2d3','#e17055'];
 
+  // No default symbol and no auto-load here — the page opens empty (just the
+  // input + placeholder) and only fetches once the user explicitly enters or
+  // selects a symbol (loadChartSymbolFromInput / setChartPeriod / the search
+  // dropdown). If a symbol was already loaded earlier in this session,
+  // re-opening the page leaves that render in place rather than re-fetching.
   function initChartPage() {
-    if (!chartSym) chartSym = watchlist[0] || null;
-    const input = document.getElementById('chartSymInput');
-    if (input) input.value = chartSym || '';
-    if (chartSym && serverAvailable) {
-      loadChartPage(chartSym, chartPeriod);
-    } else if (!chartSym) {
+    if (!chartSym) {
+      const input = document.getElementById('chartSymInput');
+      if (input) input.value = '';
       document.getElementById('chartPriceWrap').innerHTML =
-        `<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to load its chart.</div>`;
+        `<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to view chart</div>`;
     }
   }
 
@@ -7224,7 +7227,14 @@
   async function fetchChartGrades(sym) {
     const res  = await fetch(`${SERVER_URL}/api/grades/${sym}`, { headers: { 'x-app-token': APP_TOKEN } });
     const data = await res.json();
-    return Array.isArray(data) ? data : (data ? [data] : []);
+    const grades = Array.isArray(data) ? data : (data ? [data] : []);
+    // Diagnostic — the target-price lines in renderChartPricePane depend on
+    // grade rows carrying a price-target field, but the exact key FMP uses
+    // (priceTarget / adjPriceTarget / something else, or none at all on some
+    // plans) isn't confirmed. Log the raw shape so it can be checked in the
+    // browser console against what extractGradeTarget() below looks for.
+    if (grades.length) console.log(`[chart] /api/grades/${sym} sample row:`, grades[0]);
+    return grades;
   }
 
   async function fetchChartSignalLog(sym) {
@@ -7436,11 +7446,27 @@
     return best;
   }
 
+  // FMP's price-target field name isn't consistent across endpoints/plans —
+  // it's shown up as `priceTarget`, `adjPriceTarget`, `adjustedPT`, and
+  // sometimes not at all on the plain /grades response. Try the known
+  // candidates in order and use whichever one is actually a number, so this
+  // keeps working (or degrades to "no target lines", never a crash) whatever
+  // shape the live API happens to return — check the fetchChartGrades()
+  // console.log against this list if target lines still don't show up.
+  const GRADE_TARGET_KEYS = ['priceTarget', 'adjPriceTarget', 'adjustedPT', 'priceTargetAdjusted', 'targetPrice', 'newPriceTarget'];
+  function extractGradeTarget(g) {
+    for (const key of GRADE_TARGET_KEYS) {
+      const v = parseFloat(g[key]);
+      if (!isNaN(v)) return v;
+    }
+    return null;
+  }
+
   // Turns raw grade rows into per-analyst horizontal target-price segments:
-  // one segment per (company, priceTarget) pair, running from the date it was
-  // set until the company's next target change (or the end of the chart).
-  // Grades without a priceTarget are skipped — some FMP plans/endpoints don't
-  // return one, in which case this simply renders no target lines.
+  // one segment per (company, target) pair, running from the date it was set
+  // until the company's next target change (or the end of the chart). Grades
+  // without a resolvable target field (see extractGradeTarget) are skipped,
+  // in which case this simply renders no target lines rather than erroring.
   function buildAnalystTargetLines(grades, history) {
     if (!Array.isArray(grades) || !grades.length || !history.length) return [];
     const chartStart = parseHistoryDate(history[0].date);
@@ -7449,8 +7475,8 @@
 
     const byCompany = {};
     grades.forEach(g => {
-      const pt = parseFloat(g.priceTarget);
-      if (!g.date || isNaN(pt)) return;
+      const pt = extractGradeTarget(g);
+      if (!g.date || pt === null) return;
       const co = g.gradingCompany || g.analystName || 'Analyst';
       (byCompany[co] = byCompany[co] || []).push({ date: g.date, price: pt });
     });
@@ -7515,8 +7541,11 @@
       history.map((d, i) => `L${xScale(i).toFixed(1)},${yScale(d.close).toFixed(1)}`).join(' ') +
       ` L${lastX},${baseY} Z`;
 
-    const isUp   = prices[lastIdx] >= prices[0];
-    const colour = isUp ? 'var(--accent2)' : 'var(--danger)';
+    // Fixed signature color for the price line/area/endpoint — bullish/bearish
+    // is already communicated by the BUY/SELL triangle markers, so the line
+    // itself stays one consistent, high-contrast color rather than flipping
+    // on trend direction.
+    const colour = '#00d4aa';
     const fillId = `cpGrad_${sym}`;
 
     const yLabels = [minP, minP + range / 2, maxP].map(v =>
@@ -7555,13 +7584,18 @@
       if (idx === null) return '';
       const x = xScale(idx);
       const y = yScale(history[idx].close);
-      const color = isBuy ? 'var(--accent2)' : 'var(--danger)';
+      // Hardcoded, not var(--accent2)/var(--danger) — those resolve fine in
+      // Chrome/Firefox but some engines silently fail to resolve CSS custom
+      // properties on SVG presentation attributes set via innerHTML, which
+      // was rendering these as an unstyled default gray instead of the
+      // intended color. Explicit hex sidesteps that entirely.
+      const color = isBuy ? '#4ade80' : '#f87171';
       const tri = isBuy
         ? `M${(x - 5).toFixed(1)},${(y + 8).toFixed(1)} L${(x + 5).toFixed(1)},${(y + 8).toFixed(1)} L${x.toFixed(1)},${(y - 2).toFixed(1)} Z`
         : `M${(x - 5).toFixed(1)},${(y - 8).toFixed(1)} L${(x + 5).toFixed(1)},${(y - 8).toFixed(1)} L${x.toFixed(1)},${(y + 2).toFixed(1)} Z`;
       const dateLabel = (parseHistoryDate(e.ts) || new Date(e.ts)).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
       const tipPlain  = `${sig} — ${dateLabel}${e.price != null ? ' @ $' + Number(e.price).toFixed(2) : ''}`;
-      return `<path class="cp-marker" d="${tri}" fill="${color}" stroke="var(--bg)" stroke-width="0.5" onclick="showChartTooltip(event, '${escapeJs(tipPlain)}')"/>`;
+      return `<path class="cp-marker" d="${tri}" fill="${color}" stroke="#0a0a0f" stroke-width="0.5" onclick="showChartTooltip(event, '${escapeJs(tipPlain)}')"/>`;
     }).join('');
 
     wrap.innerHTML = `
@@ -7572,14 +7606,15 @@
             <stop offset="100%" stop-color="${colour}" stop-opacity="0.02"/>
           </linearGradient>
         </defs>
-        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + iH}" stroke="var(--border)" stroke-width="1"/>
-        <line x1="${pad.left}" y1="${pad.top + iH}" x2="${pad.left + iW}" y2="${pad.top + iH}" stroke="var(--border)" stroke-width="1"/>
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + iH}" stroke="#1e2540" stroke-width="1"/>
+        <line x1="${pad.left}" y1="${pad.top + iH}" x2="${pad.left + iW}" y2="${pad.top + iH}" stroke="#1e2540" stroke-width="1"/>
         <path d="${areaPath}" fill="url(#${fillId})"/>
         ${targetSvg}
         <polyline points="${points}" fill="none" stroke="${colour}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
         ${markerSvg}
-        <circle cx="${lastX}" cy="${yScale(prices[lastIdx]).toFixed(1)}" r="3.5" fill="${colour}"/>
-        <text x="${(parseFloat(lastX) + 6).toFixed(0)}" y="${yScale(prices[lastIdx]).toFixed(0)}"
+        <circle cx="${lastX}" cy="${yScale(prices[lastIdx]).toFixed(1)}" r="6" fill="none" stroke="${colour}" stroke-width="2"/>
+        <circle cx="${lastX}" cy="${yScale(prices[lastIdx]).toFixed(1)}" r="3" fill="#ffffff"/>
+        <text x="${(parseFloat(lastX) + 10).toFixed(0)}" y="${yScale(prices[lastIdx]).toFixed(0)}"
           text-anchor="start" dominant-baseline="middle" fill="${colour}" font-size="10" font-weight="700">$${prices[lastIdx].toFixed(2)}</text>
         ${yLabels}${xLabels}
       </svg>`;
@@ -7654,7 +7689,7 @@
 
     wrap.innerHTML = `
       <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
-        <line x1="${pad.left}" y1="${midY.toFixed(1)}" x2="${pad.left + iW}" y2="${midY.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+        <line x1="${pad.left}" y1="${midY.toFixed(1)}" x2="${pad.left + iW}" y2="${midY.toFixed(1)}" stroke="#1e2540" stroke-width="1"/>
         ${bars}
         ${xLabels}
       </svg>`;
@@ -7679,34 +7714,77 @@
     const chartStart = parseHistoryDate(history[0].date);
     const chartEnd    = parseHistoryDate(history[lastIdx].date);
 
-    const dots = slogEntries
+    // Build in chronological order (ascending x) so the min-spacing pass
+    // below can reason about "earlier" vs. "more recent" correctly.
+    const entries = slogEntries
       .filter(e => {
         const d = parseHistoryDate(e.ts);
         return d && d >= chartStart && d <= chartEnd;
       })
       .map(e => {
         const idx = nearestHistIndex(history, e.ts);
-        if (idx === null) return '';
-        const x = xScale(idx);
-        const sig    = e.newSignal || '';
-        const isBuy  = /BUY/.test(sig);
-        const isSell = /SELL|TRIM/.test(sig);
-        const color  = isBuy ? 'var(--accent2)' : isSell ? 'var(--danger)' : 'var(--text-dim)';
-        const dateLabel  = (parseHistoryDate(e.ts) || new Date(e.ts)).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
-        const priceLabel = e.price != null ? `$${Number(e.price).toFixed(2)}` : '';
-        const tipPlain = `${sig}${e.oldSignal ? ' (was ' + e.oldSignal + ')' : ''} — ${dateLabel}${priceLabel ? ' @ ' + priceLabel : ''}`;
+        return idx === null ? null : { e, x: xScale(idx) };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.x - b.x)
+      .map(entry => ({ ...entry, showLabel: true }));
+
+    // Min-spacing pass — when two signals land within 60px of each other,
+    // keep only the more recent one's label (text above/below the dot); the
+    // older one still gets a plain dot, with full detail still available via
+    // its click tooltip. Walk backward past already-hidden entries too so a
+    // tight run of 3+ collapses onto one label instead of leaving two labels
+    // less than 60px apart.
+    for (let i = 1; i < entries.length; i++) {
+      let j = i - 1;
+      while (j >= 0) {
+        if (entries[j].showLabel) {
+          if (entries[i].x - entries[j].x < 60) entries[j].showLabel = false;
+          break;
+        }
+        j--;
+      }
+    }
+
+    // Alternate shown labels above/below their default position for extra
+    // separation between neighbors that cleared the 60px gate but are still close.
+    let stagger = 0;
+    const dots = entries.map(({ e, x, showLabel }) => {
+      const sig    = e.newSignal || '';
+      const isBuy  = /BUY/.test(sig);
+      const isSell = /SELL|TRIM/.test(sig);
+      // Hardcoded hex (not var(--accent2)/var(--danger)/var(--text-dim)) — see
+      // the note on the price-pane triangle markers above.
+      const color  = isBuy ? '#4ade80' : isSell ? '#f87171' : '#8888aa';
+      const dateLabel  = (parseHistoryDate(e.ts) || new Date(e.ts)).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+      const priceLabel = e.price != null ? `$${Number(e.price).toFixed(2)}` : '';
+      const tipPlain = `${sig}${e.oldSignal ? ' (was ' + e.oldSignal + ')' : ''} — ${dateLabel}${priceLabel ? ' @ ' + priceLabel : ''}`;
+
+      if (!showLabel) {
+        // Dot only — no label text, so it can't collide with a neighbor's.
+        // Full detail is still one click away via the tooltip.
         return `
           <g class="cp-marker" onclick="showChartTooltip(event, '${escapeJs(tipPlain)}')">
-            <text x="${x.toFixed(1)}" y="${(midY - 14).toFixed(1)}" text-anchor="middle" fill="${color}" font-size="8" font-weight="700">${escapeHtml(sig)}</text>
-            <circle cx="${x.toFixed(1)}" cy="${midY.toFixed(1)}" r="5" fill="${color}" stroke="var(--bg)" stroke-width="1.5"/>
-            <text x="${x.toFixed(1)}" y="${(midY + 18).toFixed(1)}" text-anchor="middle" fill="var(--text-dim)" font-size="8">${priceLabel}</text>
-            <text x="${x.toFixed(1)}" y="${(midY + 30).toFixed(1)}" text-anchor="middle" fill="var(--muted)" font-size="7.5">${dateLabel}</text>
+            <circle cx="${x.toFixed(1)}" cy="${midY.toFixed(1)}" r="3.5" fill="${color}" stroke="#0a0a0f" stroke-width="1" opacity="0.85"/>
           </g>`;
-      }).join('');
+      }
+
+      stagger = stagger ? 0 : 1; // alternate 0/1 across shown labels only
+      const nameY  = midY - 14 - (stagger * 10);
+      const priceY = midY + 18 + (stagger * 10);
+      const dateY  = midY + 30 + (stagger * 10);
+      return `
+        <g class="cp-marker" onclick="showChartTooltip(event, '${escapeJs(tipPlain)}')">
+          <text x="${x.toFixed(1)}" y="${nameY.toFixed(1)}" text-anchor="middle" fill="${color}" font-size="8" font-weight="700">${escapeHtml(sig)}</text>
+          <circle cx="${x.toFixed(1)}" cy="${midY.toFixed(1)}" r="5" fill="${color}" stroke="#0a0a0f" stroke-width="1.5"/>
+          <text x="${x.toFixed(1)}" y="${priceY.toFixed(1)}" text-anchor="middle" fill="var(--text-dim)" font-size="8">${priceLabel}</text>
+          <text x="${x.toFixed(1)}" y="${dateY.toFixed(1)}" text-anchor="middle" fill="var(--muted)" font-size="7.5">${dateLabel}</text>
+        </g>`;
+    }).join('');
 
     wrap.innerHTML = `
       <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
-        <line x1="${pad.left}" y1="${midY.toFixed(1)}" x2="${pad.left + iW}" y2="${midY.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+        <line x1="${pad.left}" y1="${midY.toFixed(1)}" x2="${pad.left + iW}" y2="${midY.toFixed(1)}" stroke="#1e2540" stroke-width="1"/>
         ${dots || `<text x="${(pad.left + iW / 2).toFixed(0)}" y="${midY.toFixed(0)}" text-anchor="middle" fill="var(--muted)" font-size="10">No signal changes in this period</text>`}
       </svg>`;
   }
