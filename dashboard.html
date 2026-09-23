@@ -1367,7 +1367,7 @@
     .cp-lane-legend-group { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
     .cp-lane-legend-group b { color: var(--muted); font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase; }
     .cp-lane-legend-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-    #chartSignalPane { height: 160px; }
+    #chartSignalPane { height: 220px; }
     .cp-svg-wrap { width: 100%; height: calc(100% - 20px); position: relative; }
     .cp-svg-wrap svg { width: 100%; height: 100%; overflow: visible; }
     .cp-marker { cursor: pointer; }
@@ -1390,7 +1390,7 @@
     @media (max-width: 900px) {
       #chartPricePane { height: 320px; }
       #chartActivityPane { height: 190px; }
-      #chartSignalPane { height: 140px; }
+      #chartSignalPane { height: 190px; }
     }
 
     /* ── DETAIL DRAWER ── */
@@ -7837,17 +7837,33 @@
       </svg>`;
   }
 
-  // ── Section 3: horizontal signal-change timeline, dots colored by direction ──
+  // ── Section 3: signal-change swim lanes, one row per signal, same X axis as the other panes ──
+  const CHART_SIGNAL_LANES = [
+    { key: 'BUY — CONFIRMED', label: 'BUY — CONFIRMED', color: '#4ade80' },
+    { key: 'BUY — WATCH',     label: 'BUY — WATCH',     color: '#60a5fa' },
+    { key: 'BUY — WAIT',      label: 'BUY — WAIT',      color: '#888' },
+    { key: 'TRIM',            label: 'TRIM',            color: '#fb923c' },
+    { key: 'SELL — REVERSAL', label: 'SELL — REVERSAL', color: '#f87171' },
+    { key: 'SELL',            label: 'SELL',            color: '#dc2626' },
+  ];
+
   function renderChartSignalPane(history, slogEntries) {
     const wrap = document.getElementById('chartSignalWrap');
     if (!wrap) return;
     if (!history.length) { wrap.innerHTML = ''; return; }
 
     const W = wrap.offsetWidth || 900;
-    const H = wrap.offsetHeight || 130;
-    const pad = { top: 34, right: 56, bottom: 34, left: 54 };
+    const H = wrap.offsetHeight || 200;
+    const pad = { top: 8, right: 56, bottom: 20, left: 118 };
     const iW  = W - pad.left - pad.right;
-    const midY = pad.top + (H - pad.top - pad.bottom) / 2;
+    const iH  = H - pad.top  - pad.bottom;
+
+    const laneH = iH / CHART_SIGNAL_LANES.length;
+    const lanes = {};
+    CHART_SIGNAL_LANES.forEach((l, i) => {
+      const top = pad.top + i * laneH;
+      lanes[l.key] = { ...l, top, h: laneH, base: top + laneH, mid: top + laneH / 2 };
+    });
 
     const lastIdx = history.length - 1;
     const denom   = lastIdx || 1;
@@ -7856,78 +7872,49 @@
     const chartStart = parseHistoryDate(history[0].date);
     const chartEnd    = parseHistoryDate(history[lastIdx].date);
 
-    // Build in chronological order (ascending x) so the min-spacing pass
-    // below can reason about "earlier" vs. "more recent" correctly.
     const entries = slogEntries
-      .filter(e => {
-        const d = parseHistoryDate(e.ts);
-        return d && d >= chartStart && d <= chartEnd;
-      })
+      .filter(e => lanes[e.newSignal])
       .map(e => {
+        const d = parseHistoryDate(e.ts);
+        if (!d || d < chartStart || d > chartEnd) return null;
         const idx = nearestHistIndex(history, e.ts);
-        return idx === null ? null : { e, x: xScale(idx) };
+        return idx === null ? null : { e, idx };
       })
-      .filter(Boolean)
-      .sort((a, b) => a.x - b.x)
-      .map(entry => ({ ...entry, showLabel: true }));
+      .filter(Boolean);
 
-    // Min-spacing pass — when two signals land within 60px of each other,
-    // keep only the more recent one's label (text above/below the dot); the
-    // older one still gets a plain dot, with full detail still available via
-    // its click tooltip. Walk backward past already-hidden entries too so a
-    // tight run of 3+ collapses onto one label instead of leaving two labels
-    // less than 60px apart.
-    for (let i = 1; i < entries.length; i++) {
-      let j = i - 1;
-      while (j >= 0) {
-        if (entries[j].showLabel) {
-          if (entries[i].x - entries[j].x < 60) entries[j].showLabel = false;
-          break;
-        }
-        j--;
-      }
-    }
-
-    // Alternate shown labels above/below their default position for extra
-    // separation between neighbors that cleared the 60px gate but are still close.
-    let stagger = 0;
-    const dots = entries.map(({ e, x, showLabel }) => {
-      const sig    = e.newSignal || '';
-      const isBuy  = /BUY/.test(sig);
-      const isSell = /SELL|TRIM/.test(sig);
-      // Hardcoded hex (not var(--accent2)/var(--danger)/var(--text-dim)) — see
-      // the note on the price-pane triangle markers above.
-      const color  = isBuy ? '#4ade80' : isSell ? '#f87171' : '#8888aa';
-      const dateLabel  = (parseHistoryDate(e.ts) || new Date(e.ts)).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
-      const priceLabel = e.price != null ? `$${Number(e.price).toFixed(2)}` : '';
-      const tipPlain = `${sig}${e.oldSignal ? ' (was ' + e.oldSignal + ')' : ''} — ${dateLabel}${priceLabel ? ' @ ' + priceLabel : ''}`;
-
-      if (!showLabel) {
-        // Dot only — no label text, so it can't collide with a neighbor's.
-        // Full detail is still one click away via the tooltip.
-        return `
-          <g class="cp-marker" onclick="showChartTooltip(event, '${escapeJs(tipPlain)}')">
-            <circle cx="${x.toFixed(1)}" cy="${midY.toFixed(1)}" r="3.5" fill="${color}" stroke="#0a0a0f" stroke-width="1" opacity="0.85"/>
-          </g>`;
-      }
-
-      stagger = stagger ? 0 : 1; // alternate 0/1 across shown labels only
-      const nameY  = midY - 14 - (stagger * 10);
-      const priceY = midY + 18 + (stagger * 10);
-      const dateY  = midY + 30 + (stagger * 10);
+    const dots = entries.map(({ e, idx }) => {
+      const lane = lanes[e.newSignal];
+      const x = xScale(idx);
+      const dateLabel = (parseHistoryDate(e.ts) || new Date(e.ts)).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: '2-digit' });
       return `
-        <g class="cp-marker" onclick="showChartTooltip(event, '${escapeJs(tipPlain)}')">
-          <text x="${x.toFixed(1)}" y="${nameY.toFixed(1)}" text-anchor="middle" fill="${color}" font-size="8" font-weight="700">${escapeHtml(sig)}</text>
-          <circle cx="${x.toFixed(1)}" cy="${midY.toFixed(1)}" r="5" fill="${color}" stroke="#0a0a0f" stroke-width="1.5"/>
-          <text x="${x.toFixed(1)}" y="${priceY.toFixed(1)}" text-anchor="middle" fill="var(--text-dim)" font-size="8">${priceLabel}</text>
-          <text x="${x.toFixed(1)}" y="${dateY.toFixed(1)}" text-anchor="middle" fill="var(--muted)" font-size="7.5">${dateLabel}</text>
+        <g class="cp-marker">
+          <title>${escapeHtml(dateLabel)}</title>
+          <circle cx="${x.toFixed(1)}" cy="${lane.mid.toFixed(1)}" r="4.5" fill="${lane.color}" stroke="#0a0a0f" stroke-width="1.2"/>
         </g>`;
+    }).join('');
+
+    const xIdxs = [...new Set([0, Math.round(lastIdx * 0.5), lastIdx])];
+    const xLabels = xIdxs.map(i => {
+      const d = (parseHistoryDate(history[i].date) || new Date(history[i].date)).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: '2-digit' });
+      const anchor = i === 0 ? 'start' : (i === lastIdx ? 'end' : 'middle');
+      return `<text x="${xScale(i).toFixed(0)}" y="${(pad.top + iH + 13).toFixed(0)}" text-anchor="${anchor}" fill="var(--muted)" font-size="9">${d}</text>`;
+    }).join('');
+
+    const laneLabels = CHART_SIGNAL_LANES.map(l =>
+      `<text x="4" y="${lanes[l.key].mid.toFixed(1)}" text-anchor="start" dominant-baseline="middle" fill="${l.color}" font-size="8" font-weight="700">${escapeHtml(l.label)}</text>`
+    ).join('');
+
+    const laneLines = CHART_SIGNAL_LANES.map(l => {
+      const ly = lanes[l.key].base;
+      return `<line x1="${pad.left}" y1="${ly.toFixed(1)}" x2="${(pad.left + iW).toFixed(1)}" y2="${ly.toFixed(1)}" stroke="#1e2540" stroke-width="1"/>`;
     }).join('');
 
     wrap.innerHTML = `
       <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
-        <line x1="${pad.left}" y1="${midY.toFixed(1)}" x2="${pad.left + iW}" y2="${midY.toFixed(1)}" stroke="#1e2540" stroke-width="1"/>
-        ${dots || `<text x="${(pad.left + iW / 2).toFixed(0)}" y="${midY.toFixed(0)}" text-anchor="middle" fill="var(--muted)" font-size="10">No signal changes in this period</text>`}
+        ${laneLines}
+        ${laneLabels}
+        ${dots}
+        ${xLabels}
       </svg>`;
   }
 
