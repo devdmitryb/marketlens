@@ -1357,7 +1357,7 @@
       margin-bottom: 8px;
     }
     #chartPricePane { height: 460px; }
-    #chartActivityPane { height: 150px; }
+    #chartActivityPane { height: 210px; }
     #chartSignalPane { height: 160px; }
     .cp-svg-wrap { width: 100%; height: calc(100% - 20px); position: relative; }
     .cp-svg-wrap svg { width: 100%; height: 100%; overflow: visible; }
@@ -1380,7 +1380,7 @@
     }
     @media (max-width: 900px) {
       #chartPricePane { height: 320px; }
-      #chartActivityPane { height: 130px; }
+      #chartActivityPane { height: 190px; }
       #chartSignalPane { height: 140px; }
     }
 
@@ -7636,19 +7636,21 @@
     const a = (action || '').toLowerCase();
     return a === 'reit' || a === 'reiterate' || a === 'maintain';
   }
+  // Three swim lanes (Buy / Hold / Sell), each with its own baseline —
+  // avoids the old shared-midline layout where a busy buy day could crowd
+  // out the sell bars drawn below it.
   function renderChartActivityPane(history, grades) {
     const wrap = document.getElementById('chartActivityWrap');
     if (!wrap) return;
     if (!history.length) { wrap.innerHTML = ''; return; }
 
     const W = wrap.offsetWidth || 900;
-    const H = wrap.offsetHeight || 120;
-    const pad = { top: 14, right: 56, bottom: 18, left: 54 };
+    const H = wrap.offsetHeight || 190;
+    const pad = { top: 8, right: 56, bottom: 18, left: 104 };
     const iW  = W - pad.left - pad.right;
     const iH  = H - pad.top  - pad.bottom;
-    const midY   = pad.top + iH * 0.6;
-    const aboveH = iH * 0.6;
-    const belowH = iH * 0.4;
+    const laneH = iH / 3;
+    const laneInnerH = laneH * 0.78; // headroom for the count label above each bar
 
     const lastIdx = history.length - 1;
     const denom   = lastIdx || 1;
@@ -7656,7 +7658,7 @@
 
     const chartStart = parseHistoryDate(history[0].date);
     const chartEnd    = parseHistoryDate(history[lastIdx].date);
-    const buckets = {}; // idx -> { buy, hold, sell }
+    const buckets = {}; // idx -> { buy, hold, sell, buyW, holdW, sellW }
     grades.forEach(g => {
       const d = parseHistoryDate(g.date);
       if (!d || d < chartStart || d > chartEnd) return;
@@ -7669,30 +7671,34 @@
       b[cls + 'W'] += weight;
     });
 
-    const maxCount = Math.max(1, ...Object.values(buckets).flatMap(b => [b.buyW, b.holdW, b.sellW]));
+    const bucketVals = Object.values(buckets);
+    const laneMax = {
+      buy:  Math.max(1, ...bucketVals.map(b => b.buyW)),
+      hold: Math.max(1, ...bucketVals.map(b => b.holdW)),
+      sell: Math.max(1, ...bucketVals.map(b => b.sellW)),
+    };
+    // Baseline (bottom edge) of each lane — bars grow upward from it.
+    const laneBase = {
+      buy:  pad.top + laneH,
+      hold: pad.top + laneH * 2,
+      sell: pad.top + laneH * 3,
+    };
+    const laneColor = { buy: 'var(--accent2)', hold: 'var(--muted)', sell: 'var(--danger)' };
     const barW = Math.max(2, Math.min(9, (iW / (lastIdx + 1)) * 0.7));
 
     const bars = Object.entries(buckets).map(([idxStr, b]) => {
       const idx = parseInt(idxStr, 10);
       const x = xScale(idx);
       let svg = '';
-      if (b.buy > 0) {
-        const h  = (b.buyW / maxCount) * aboveH;
-        const bx = x - barW * 0.65;
-        svg += `<rect x="${(bx - barW / 2).toFixed(1)}" y="${(midY - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--accent2)" rx="1"/>
-          <text x="${bx.toFixed(1)}" y="${(midY - h - 3).toFixed(1)}" text-anchor="middle" fill="var(--accent2)" font-size="7.5" font-weight="700">${b.buy}</text>`;
-      }
-      if (b.hold > 0) {
-        const h  = (b.holdW / maxCount) * aboveH * 0.55; // deliberately shorter, per spec
-        const hx = x + barW * 0.65;
-        svg += `<rect x="${(hx - barW / 2).toFixed(1)}" y="${(midY - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--muted)" rx="1" opacity="0.8"/>
-          <text x="${hx.toFixed(1)}" y="${(midY - h - 3).toFixed(1)}" text-anchor="middle" fill="var(--muted)" font-size="7">${b.hold}</text>`;
-      }
-      if (b.sell > 0) {
-        const h = (b.sellW / maxCount) * belowH;
-        svg += `<rect x="${(x - barW / 2).toFixed(1)}" y="${midY.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--danger)" rx="1"/>
-          <text x="${x.toFixed(1)}" y="${(midY + h + 9).toFixed(1)}" text-anchor="middle" fill="var(--danger)" font-size="7.5" font-weight="700">${b.sell}</text>`;
-      }
+      ['buy', 'hold', 'sell'].forEach(type => {
+        const count = b[type];
+        if (count <= 0) return;
+        const h = (b[type + 'W'] / laneMax[type]) * laneInnerH;
+        const base = laneBase[type];
+        const color = laneColor[type];
+        svg += `<rect x="${(x - barW / 2).toFixed(1)}" y="${(base - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${color}" rx="1"${type === 'hold' ? ' opacity="0.8"' : ''}/>
+          <text x="${x.toFixed(1)}" y="${(base - h - 3).toFixed(1)}" text-anchor="middle" fill="${color}" font-size="7.5" font-weight="700">${count}</text>`;
+      });
       return svg;
     }).join('');
 
@@ -7703,9 +7709,20 @@
       return `<text x="${xScale(i).toFixed(0)}" y="${(pad.top + iH + 13).toFixed(0)}" text-anchor="${anchor}" fill="var(--muted)" font-size="9">${d}</text>`;
     }).join('');
 
+    const laneLabel = (y, text, color) =>
+      `<text x="4" y="${y.toFixed(1)}" text-anchor="start" dominant-baseline="middle" fill="${color}" font-size="8" font-weight="700">${text}</text>`;
+    const laneLabels = laneLabel(pad.top + laneH * 0.5, 'Buy / Upgrade', 'var(--accent2)') +
+      laneLabel(pad.top + laneH * 1.5, 'Hold / Neutral', 'var(--muted)') +
+      laneLabel(pad.top + laneH * 2.5, 'Sell / Downgrade', 'var(--danger)');
+
+    const separators = [laneBase.buy, laneBase.hold, laneBase.sell].map(y =>
+      `<line x1="${pad.left}" y1="${y.toFixed(1)}" x2="${(pad.left + iW).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#1e2540" stroke-width="1"/>`
+    ).join('');
+
     wrap.innerHTML = `
       <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
-        <line x1="${pad.left}" y1="${midY.toFixed(1)}" x2="${pad.left + iW}" y2="${midY.toFixed(1)}" stroke="#1e2540" stroke-width="1"/>
+        ${separators}
+        ${laneLabels}
         ${bars}
         ${xLabels}
       </svg>`;
