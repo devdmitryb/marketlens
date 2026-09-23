@@ -7621,6 +7621,21 @@
   }
 
   // ── Section 2: per-date analyst activity bars (buy/hold above midline, sell below) ──
+  // Color reflects the actual rating (newGrade), not just the action — a
+  // "maintain"/"reit" can be maintaining a Buy or a Sell, so action alone
+  // can't tell us the color. Mirrors classifyGrade() in server/signals.js.
+  function classifyGrade(newGrade) {
+    const gr = (newGrade || '').toLowerCase();
+    if (/buy|outperform|overweight|strong buy|accumulate/.test(gr)) return 'buy';
+    if (/sell|underperform|underweight|reduce/.test(gr)) return 'sell';
+    return 'hold';
+  }
+  // Reiterate/maintain bars are drawn shorter than a fresh upgrade/downgrade/
+  // initiate — they confirm an existing opinion rather than voice a new one.
+  function isReiterateAction(action) {
+    const a = (action || '').toLowerCase();
+    return a === 'reit' || a === 'reiterate' || a === 'maintain';
+  }
   function renderChartActivityPane(history, grades) {
     const wrap = document.getElementById('chartActivityWrap');
     if (!wrap) return;
@@ -7647,13 +7662,14 @@
       if (!d || d < chartStart || d > chartEnd) return;
       const idx = nearestHistIndex(history, g.date);
       if (idx === null) return;
-      const b = buckets[idx] = buckets[idx] || { buy: 0, hold: 0, sell: 0 };
-      if (g.action === 'upgrade' || g.action === 'initialise') b.buy++;
-      else if (g.action === 'downgrade') b.sell++;
-      else b.hold++;
+      const b = buckets[idx] = buckets[idx] || { buy: 0, hold: 0, sell: 0, buyW: 0, holdW: 0, sellW: 0 };
+      const cls = classifyGrade(g.newGrade);
+      const weight = isReiterateAction(g.action) ? 0.65 : 1; // fresh action = 100%, reiterate/maintain = 65%
+      b[cls]++;
+      b[cls + 'W'] += weight;
     });
 
-    const maxCount = Math.max(1, ...Object.values(buckets).flatMap(b => [b.buy, b.hold, b.sell]));
+    const maxCount = Math.max(1, ...Object.values(buckets).flatMap(b => [b.buyW, b.holdW, b.sellW]));
     const barW = Math.max(2, Math.min(9, (iW / (lastIdx + 1)) * 0.7));
 
     const bars = Object.entries(buckets).map(([idxStr, b]) => {
@@ -7661,19 +7677,19 @@
       const x = xScale(idx);
       let svg = '';
       if (b.buy > 0) {
-        const h  = (b.buy / maxCount) * aboveH;
+        const h  = (b.buyW / maxCount) * aboveH;
         const bx = x - barW * 0.65;
         svg += `<rect x="${(bx - barW / 2).toFixed(1)}" y="${(midY - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--accent2)" rx="1"/>
           <text x="${bx.toFixed(1)}" y="${(midY - h - 3).toFixed(1)}" text-anchor="middle" fill="var(--accent2)" font-size="7.5" font-weight="700">${b.buy}</text>`;
       }
       if (b.hold > 0) {
-        const h  = (b.hold / maxCount) * aboveH * 0.55; // deliberately shorter, per spec
+        const h  = (b.holdW / maxCount) * aboveH * 0.55; // deliberately shorter, per spec
         const hx = x + barW * 0.65;
         svg += `<rect x="${(hx - barW / 2).toFixed(1)}" y="${(midY - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--muted)" rx="1" opacity="0.8"/>
           <text x="${hx.toFixed(1)}" y="${(midY - h - 3).toFixed(1)}" text-anchor="middle" fill="var(--muted)" font-size="7">${b.hold}</text>`;
       }
       if (b.sell > 0) {
-        const h = (b.sell / maxCount) * belowH;
+        const h = (b.sellW / maxCount) * belowH;
         svg += `<rect x="${(x - barW / 2).toFixed(1)}" y="${midY.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="var(--danger)" rx="1"/>
           <text x="${x.toFixed(1)}" y="${(midY + h + 9).toFixed(1)}" text-anchor="middle" fill="var(--danger)" font-size="7.5" font-weight="700">${b.sell}</text>`;
       }
