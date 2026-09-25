@@ -129,6 +129,16 @@ async function initSchema() {
         data       JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS target_history (
+        symbol            TEXT NOT NULL,
+        date              DATE NOT NULL DEFAULT CURRENT_DATE,
+        target_high       NUMERIC,
+        target_low        NUMERIC,
+        target_consensus  NUMERIC,
+        target_median     NUMERIC,
+        PRIMARY KEY (symbol, date)
+      );
     `);
 
     await migrateToMultiUser(client);
@@ -549,6 +559,35 @@ async function upsertHistory(symbol, rows) {
   }
 }
 
+// Target history — one row per (symbol, date), written once/day by cron so
+// the chart page can draw how the analyst target corridor moved over time.
+async function upsertTargetHistory(symbol, data) {
+  const { targetHigh = null, targetLow = null, targetConsensus = null, targetMedian = null } = data || {};
+  await pool.query(`
+    INSERT INTO target_history (symbol, date, target_high, target_low, target_consensus, target_median)
+    VALUES ($1, CURRENT_DATE, $2, $3, $4, $5)
+    ON CONFLICT (symbol, date) DO UPDATE SET
+      target_high = $2, target_low = $3, target_consensus = $4, target_median = $5
+  `, [symbol, targetHigh, targetLow, targetConsensus, targetMedian]);
+}
+
+// Date is cast to text via TO_CHAR — see getHistory() above for why.
+async function getTargetHistory(symbol, fromDate) {
+  const res = await pool.query(
+    `SELECT symbol, TO_CHAR(date, 'YYYY-MM-DD') AS date,
+            target_high, target_low, target_consensus, target_median
+     FROM target_history WHERE symbol = $1 AND date >= $2 ORDER BY date ASC`,
+    [symbol, fromDate]
+  );
+  return res.rows.map(r => ({
+    date:            r.date,
+    targetHigh:      r.target_high      != null ? parseFloat(r.target_high)      : null,
+    targetLow:       r.target_low       != null ? parseFloat(r.target_low)       : null,
+    targetConsensus: r.target_consensus != null ? parseFloat(r.target_consensus) : null,
+    targetMedian:    r.target_median    != null ? parseFloat(r.target_median)    : null,
+  }));
+}
+
 // Earnings cache
 async function getCachedEarnings(symbol) {
   const res = await pool.query('SELECT data, updated_at FROM earnings_cache WHERE symbol = $1', [symbol]);
@@ -580,5 +619,6 @@ module.exports = {
   getCachedGrades, setCachedGrades,
   getCachedTarget, setCachedTarget,
   getHistory, upsertHistory,
+  upsertTargetHistory, getTargetHistory,
   getCachedEarnings, setCachedEarnings,
 };
