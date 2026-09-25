@@ -374,6 +374,24 @@ app.get('/api/target/:sym', auth, async (req, res) => {
   }
 });
 
+// Daily analyst target-corridor history — serve from target_history (written by
+// cron's refreshSymbol, once per symbol per day)
+app.get('/api/target-history/:sym', auth, async (req, res) => {
+  const sym  = req.params.sym.toUpperCase();
+  const from = req.query.from || (() => {
+    const d = new Date(); d.setDate(d.getDate() - 90);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  try {
+    const rows = await db.getTargetHistory(sym, from);
+    res.json(rows);
+  } catch(e) {
+    console.error(`[db] getTargetHistory failed for ${sym}:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Historical prices — serve from price_history, lazily backfill on insufficient coverage
 app.get('/api/history/:sym', auth, async (req, res) => {
   const sym  = req.params.sym.toUpperCase();
