@@ -2041,6 +2041,7 @@
       <div class="cp-svg-wrap" id="chartPriceWrap">
         <div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Enter a symbol to view chart</div>
       </div>
+      <div class="cp-lane-legend" id="chartPriceLegend"></div>
     </div>
 
     <div id="chartActivityPane" class="chart-pane">
@@ -7250,6 +7251,17 @@
     return grades;
   }
 
+  // Daily analyst target-corridor snapshots — /api/target-history/:sym, written
+  // once/day per symbol by cron's refreshSymbol(). Drives the corridor lines in
+  // renderChartPricePane; simply renders no corridor if the range is empty.
+  async function fetchChartTargetHistory(sym, days) {
+    const from = new Date(); from.setDate(from.getDate() - days);
+    const fromStr = from.toISOString().slice(0, 10);
+    const res  = await fetch(`${SERVER_URL}/api/target-history/${sym}?from=${fromStr}`, { headers: { 'x-app-token': APP_TOKEN } });
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  }
+
   async function fetchChartSignalLog(sym) {
     const res  = await fetch(`${SERVER_URL}/api/signal-log?limit=500`, { headers: { 'x-app-token': APP_TOKEN } });
     const data = await res.json();
@@ -7291,18 +7303,20 @@
 
     document.getElementById('chartPriceWrap').innerHTML =
       `<div style="color:var(--muted);font-size:0.78rem;text-align:center;padding:60px 0">Loading…</div>`;
+    document.getElementById('chartPriceLegend').innerHTML  = '';
     document.getElementById('chartActivityWrap').innerHTML = '';
     document.getElementById('chartSignalWrap').innerHTML   = '';
     const badge = document.getElementById('chartCurrentSignalBadge');
     if (badge) badge.textContent = '';
 
     try {
-      const [history, grades, slog, signalInfo, volSignals] = await Promise.all([
+      const [history, grades, slog, signalInfo, volSignals, targetHist] = await Promise.all([
         fetchChartHistory(sym, days),
         fetchChartGrades(sym),
         fetchChartSignalLog(sym),
         fetchChartCurrentSignal(sym),
         fetchChartVolumeSignals(sym),
+        fetchChartTargetHistory(sym, days),
       ]);
       if (seq !== chartLoadSeq) return; // a newer request superseded this one
 
@@ -7323,7 +7337,7 @@
         return;
       }
 
-      renderChartPricePane(history, grades, slog, sym);
+      renderChartPricePane(history, grades, slog, sym, targetHist);
       renderChartActivityPane(history, grades, volSignals);
       renderChartSignalPane(history, slog);
     } catch(e) {
@@ -7532,8 +7546,37 @@
     return lines;
   }
 
+  // Daily target-corridor lines (targetHigh/targetLow/targetConsensus/targetMedian
+  // + a computed conservativeTarget = targetLow * 0.75, matching calcConservativeUpside()
+  // elsewhere) as continuous paths over time — one point per target_history row,
+  // mapped onto the price chart's date-indexed X axis via nearestHistIndex.
+  const CHART_TARGET_CORRIDOR_LANES = [
+    { key: 'targetHigh',         label: 'Target High',        color: '#54a0ff', dash: '4,3' },
+    { key: 'targetConsensus',    label: 'Target Consensus',   color: '#feca57', dash: null  },
+    { key: 'targetMedian',       label: 'Target Median',      color: '#feca57', dash: '4,3' },
+    { key: 'targetLow',          label: 'Target Low',         color: '#ff9f43', dash: '4,3' },
+    { key: 'conservativeTarget', label: 'Conservative Target', color: '#ff6b6b', dash: '4,3' },
+  ];
+
+  function buildTargetCorridorLines(targetHist, history) {
+    if (!Array.isArray(targetHist) || !targetHist.length || !history.length) return [];
+    const points = targetHist
+      .map(t => ({ ...t, conservativeTarget: t.targetLow != null ? t.targetLow * 0.75 : null }))
+      .map(t => ({ t, idx: nearestHistIndex(history, t.date) }))
+      .filter(p => p.idx !== null)
+      .sort((a, b) => a.idx - b.idx);
+    if (!points.length) return [];
+
+    return CHART_TARGET_CORRIDOR_LANES.map(lane => {
+      const coords = points
+        .filter(p => p.t[lane.key] != null)
+        .map(p => ({ idx: p.idx, price: p.t[lane.key] }));
+      return { ...lane, coords };
+    }).filter(l => l.coords.length > 1);
+  }
+
   // ── Section 1: price line + area fill, BUY/SELL signal triangles, analyst target lines ──
-  function renderChartPricePane(history, grades, slogEntries, sym) {
+  function renderChartPricePane(history, grades, slogEntries, sym, targetHist) {
     const wrap = document.getElementById('chartPriceWrap');
     if (!wrap || !history.length) return;
 
@@ -7547,10 +7590,11 @@
     const denom   = lastIdx || 1;
     const xScale  = i => pad.left + (i / denom) * iW;
 
-    const targetLines = buildAnalystTargetLines(grades, history);
+    const targetLines    = buildAnalystTargetLines(grades, history);
+    const corridorLines  = buildTargetCorridorLines(targetHist, history);
 
     const prices  = history.map(d => d.close);
-    const allVals = [...prices, ...targetLines.map(l => l.price)];
+    const allVals = [...prices, ...targetLines.map(l => l.price), ...corridorLines.flatMap(l => l.coords.map(c => c.price))];
     let minP = Math.min(...allVals);
     let maxP = Math.max(...allVals);
     if (minP === maxP) { minP -= 1; maxP += 1; }
@@ -7601,6 +7645,14 @@
         </g>`;
     }).join('');
 
+    const corridorSvg = corridorLines.map(l => {
+      const d = l.coords.map((c, i) =>
+        `${i === 0 ? 'M' : 'L'}${xScale(c.idx).toFixed(1)},${yScale(c.price).toFixed(1)}`
+      ).join(' ');
+      const dashAttr = l.dash ? ` stroke-dasharray="${l.dash}"` : '';
+      return `<path d="${d}" fill="none" stroke="${l.color}" stroke-width="1.3"${dashAttr} opacity="0.75"/>`;
+    }).join('');
+
     const markerSvg = slogEntries.map(e => {
       const sig    = e.newSignal || '';
       const isBuy  = /BUY/.test(sig) && /CONFIRMED/.test(sig);
@@ -7636,6 +7688,7 @@
         <line x1="${pad.left}" y1="${pad.top + iH}" x2="${pad.left + iW}" y2="${pad.top + iH}" stroke="#1e2540" stroke-width="1"/>
         <path d="${areaPath}" fill="url(#${fillId})"/>
         ${targetSvg}
+        ${corridorSvg}
         <polyline points="${points}" fill="none" stroke="${colour}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
         ${markerSvg}
         <circle cx="${lastX}" cy="${yScale(prices[lastIdx]).toFixed(1)}" r="6" fill="none" stroke="${colour}" stroke-width="2"/>
@@ -7644,6 +7697,19 @@
           text-anchor="start" dominant-baseline="middle" fill="${colour}" font-size="10" font-weight="700">$${prices[lastIdx].toFixed(2)}</text>
         ${yLabels}${xLabels}
       </svg>`;
+
+    renderChartTargetCorridorLegend(corridorLines);
+  }
+
+  function renderChartTargetCorridorLegend(corridorLines) {
+    const el = document.getElementById('chartPriceLegend');
+    if (!el) return;
+    if (!corridorLines.length) { el.innerHTML = ''; return; }
+    el.innerHTML = CHART_TARGET_CORRIDOR_LANES.map(lane => {
+      const dashStyle = lane.dash ? 'dashed' : 'solid';
+      const glyph = `<span style="display:inline-block;width:12px;height:0;border-top:2px ${dashStyle} ${lane.color}"></span>`;
+      return `<span class="cp-lane-legend-item">${glyph}${escapeHtml(lane.label)}</span>`;
+    }).join('');
   }
 
   // ── Section 2: per-date analyst activity bars (buy/hold above midline, sell below) ──

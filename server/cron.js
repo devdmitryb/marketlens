@@ -263,6 +263,23 @@ async function refreshSymbol(sym, holdings) {
     }
   }
 
+  // Daily target corridor snapshot — upsert is safe to call every refresh
+  // (PRIMARY KEY (symbol, date) just overwrites today's row), so no extra
+  // "once per day" gating is needed. Failure here must not affect the main
+  // refresh flow.
+  if (target) {
+    try {
+      await db.upsertTargetHistory(sym, {
+        targetHigh:      target.targetHigh,
+        targetLow:       target.targetLow,
+        targetConsensus: target.targetConsensus,
+        targetMedian:    target.targetMedian,
+      });
+    } catch(e) {
+      console.error(`[db] upsertTargetHistory failed for ${sym}:`, e.message);
+    }
+  }
+
   // 3. Price history — incremental upsert (full 90d backfill on first sighting)
   try {
     const { rows: maxRows } = await db.pool.query(
