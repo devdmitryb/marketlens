@@ -29,24 +29,28 @@ async function initSchema() {
         created_at    TIMESTAMPTZ DEFAULT NOW(),
         last_active   TIMESTAMPTZ
       );
+      ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
       CREATE TABLE IF NOT EXISTS watchlist (
         id         SERIAL PRIMARY KEY,
         symbol     TEXT NOT NULL UNIQUE,
         added_at   TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE watchlist ENABLE ROW LEVEL SECURITY;
 
       CREATE TABLE IF NOT EXISTS portfolio (
         id         SERIAL PRIMARY KEY,
         data       JSONB NOT NULL DEFAULT '{"open":[],"closed":[]}'::jsonb,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE portfolio ENABLE ROW LEVEL SECURITY;
 
       CREATE TABLE IF NOT EXISTS practice (
         id         SERIAL PRIMARY KEY,
         data       JSONB NOT NULL DEFAULT '[]'::jsonb,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE practice ENABLE ROW LEVEL SECURITY;
 
       CREATE TABLE IF NOT EXISTS signals (
         id         SERIAL PRIMARY KEY,
@@ -54,6 +58,7 @@ async function initSchema() {
         data       JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE signals ENABLE ROW LEVEL SECURITY;
 
       ALTER TABLE signals ADD COLUMN IF NOT EXISTS volume_signal TEXT;
       ALTER TABLE signals ADD COLUMN IF NOT EXISTS combined_signal TEXT;
@@ -68,6 +73,7 @@ async function initSchema() {
         source     TEXT DEFAULT 'server',
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE signal_log ENABLE ROW LEVEL SECURITY;
 
       ALTER TABLE signal_log ADD COLUMN IF NOT EXISTS price NUMERIC;
 
@@ -80,6 +86,7 @@ async function initSchema() {
         price         NUMERIC,
         created_at    TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE signal_events ENABLE ROW LEVEL SECURITY;
       CREATE INDEX IF NOT EXISTS signal_events_symbol_idx ON signal_events(symbol);
       CREATE INDEX IF NOT EXISTS signal_events_created_at_idx ON signal_events(created_at DESC);
 
@@ -92,24 +99,28 @@ async function initSchema() {
         published_at TIMESTAMPTZ,
         created_at   TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE screener ENABLE ROW LEVEL SECURITY;
 
       CREATE TABLE IF NOT EXISTS quotes_cache (
         symbol     TEXT PRIMARY KEY,
         data       JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE quotes_cache ENABLE ROW LEVEL SECURITY;
 
       CREATE TABLE IF NOT EXISTS grades_cache (
         symbol     TEXT PRIMARY KEY,
         data       JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE grades_cache ENABLE ROW LEVEL SECURITY;
 
       CREATE TABLE IF NOT EXISTS target_cache (
         symbol     TEXT PRIMARY KEY,
         data       JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE target_cache ENABLE ROW LEVEL SECURITY;
 
       CREATE TABLE IF NOT EXISTS price_history (
         symbol      TEXT NOT NULL,
@@ -122,6 +133,7 @@ async function initSchema() {
         updated_at  TIMESTAMPTZ DEFAULT NOW(),
         PRIMARY KEY (symbol, date)
       );
+      ALTER TABLE price_history ENABLE ROW LEVEL SECURITY;
       CREATE INDEX IF NOT EXISTS price_history_symbol_date_idx ON price_history(symbol, date DESC);
 
       CREATE TABLE IF NOT EXISTS earnings_cache (
@@ -129,6 +141,7 @@ async function initSchema() {
         data       JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE earnings_cache ENABLE ROW LEVEL SECURITY;
 
       CREATE TABLE IF NOT EXISTS target_history (
         symbol            TEXT NOT NULL,
@@ -139,6 +152,7 @@ async function initSchema() {
         target_median     NUMERIC,
         PRIMARY KEY (symbol, date)
       );
+      ALTER TABLE target_history ENABLE ROW LEVEL SECURITY;
     `);
 
     await migrateToMultiUser(client);
