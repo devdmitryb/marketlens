@@ -7594,15 +7594,17 @@
     const targetLines    = buildAnalystTargetLines(grades, history);
     const corridorLines  = buildTargetCorridorLines(targetHist, history);
 
+    // Y axis scales to the PRICE data only — analyst target/corridor lines can
+    // sit well above or below the price range and would otherwise flatten the
+    // price line into a sliver. Those lines are clipped to the plot area
+    // (clipPath below) instead of being allowed to widen the axis.
     const prices  = history.map(d => d.close);
-    const allVals = [...prices, ...targetLines.map(l => l.price), ...corridorLines.flatMap(l => l.coords.map(c => c.price))];
-    let minP = Math.min(...allVals);
-    let maxP = Math.max(...allVals);
+    let minP = Math.min(...prices) * 0.95;
+    let maxP = Math.max(...prices) * 1.05;
     if (minP === maxP) { minP -= 1; maxP += 1; }
-    const vPad = (maxP - minP) * 0.06;
-    minP -= vPad; maxP += vPad;
     const range  = maxP - minP || 1;
     const yScale = p => pad.top + iH - ((p - minP) / range) * iH;
+    const clipId = `cpPlotClip_${sym}`;
 
     const points = history.map((d, i) => `${xScale(i).toFixed(1)},${yScale(d.close).toFixed(1)}`).join(' ');
     const firstX = xScale(0).toFixed(1);
@@ -7684,12 +7686,17 @@
             <stop offset="0%" stop-color="${colour}" stop-opacity="0.22"/>
             <stop offset="100%" stop-color="${colour}" stop-opacity="0.02"/>
           </linearGradient>
+          <clipPath id="${clipId}">
+            <rect x="${pad.left}" y="${pad.top}" width="${iW}" height="${iH}"/>
+          </clipPath>
         </defs>
         <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + iH}" stroke="#1e2540" stroke-width="1"/>
         <line x1="${pad.left}" y1="${pad.top + iH}" x2="${pad.left + iW}" y2="${pad.top + iH}" stroke="#1e2540" stroke-width="1"/>
         <path d="${areaPath}" fill="url(#${fillId})"/>
-        ${targetSvg}
-        ${corridorSvg}
+        <g clip-path="url(#${clipId})">
+          ${targetSvg}
+          ${corridorSvg}
+        </g>
         <polyline points="${points}" fill="none" stroke="${colour}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
         ${markerSvg}
         <circle cx="${lastX}" cy="${yScale(prices[lastIdx]).toFixed(1)}" r="6" fill="none" stroke="${colour}" stroke-width="2"/>
@@ -7707,8 +7714,10 @@
     if (!el) return;
     if (!corridorLines.length) { el.innerHTML = ''; return; }
     el.innerHTML = CHART_TARGET_CORRIDOR_LANES.map(lane => {
-      const dashStyle = lane.dash ? 'dashed' : 'solid';
-      const glyph = `<span style="display:inline-block;width:12px;height:0;border-top:2px ${dashStyle} ${lane.color}"></span>`;
+      const dashAttr = lane.dash ? ` stroke-dasharray="${lane.dash}"` : '';
+      const glyph = `<svg width="16" height="10" viewBox="0 0 16 10" style="vertical-align:middle">
+          <line x1="0" y1="5" x2="16" y2="5" stroke="${lane.color}" stroke-width="2"${dashAttr}/>
+        </svg>`;
       return `<span class="cp-lane-legend-item">${glyph}${escapeHtml(lane.label)}</span>`;
     }).join('');
   }
