@@ -2032,6 +2032,7 @@
         <button class="chart-period-btn" id="cp-182" onclick="setChartPeriod(182, this)">6M</button>
         <button class="chart-period-btn active" id="cp-365" onclick="setChartPeriod(365, this)">1Y</button>
         <button class="chart-period-btn" id="cp-730" onclick="setChartPeriod(730, this)">2Y</button>
+        <button class="chart-period-btn" id="cp-1095" onclick="setChartPeriod(1095, this)">3Y</button>
       </div>
       <span id="chartCurrentSignalBadge" style="margin-left:auto;font-family:var(--mono);font-size:0.8rem;color:var(--text-dim)"></span>
     </div>
@@ -7177,13 +7178,13 @@
   //  separate date-axis component.
   // ══════════════════════════════════════════
   let chartSym          = null;
-  let chartPeriod        = 365; // 182 (6M) | 365 (1Y) | 730 (2Y)
+  let chartPeriod        = 365; // 182 (6M) | 365 (1Y) | 730 (2Y) | 1095 (3Y)
   let chartPriceHist     = [];
   let chartGrades        = [];
   let chartSlogEntries   = [];
   let chartPageHistCache = {}; // `${sym}_${days}` -> history array, in-memory only
   // (no localStorage — large periods were deliberately dropped from the cache
-  // in ML-158 to fix localStorage bloat; this page only ever asks for 6M/1Y/2Y)
+  // in ML-158 to fix localStorage bloat; this page only ever asks for 6M/1Y/2Y/3Y)
   let chartLoadSeq       = 0;  // guards against an older fetch clobbering a newer one
 
   const CHART_ANALYST_PALETTE = ['#3df5c1','#ff9f43','#54a0ff','#ff6b9d','#feca57','#a29bfe','#1dd1a1','#ff7675','#00d2d3','#e17055'];
