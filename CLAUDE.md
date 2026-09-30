@@ -38,6 +38,15 @@ Multi-user, JWT-based. `login.html` POSTs `{ username, password }` to `/api/logi
 
 On first startup after the multiuser migration, `server/db.js`'s `initSchema()` bootstraps a single admin user (username `admin` or `ADMIN_USERNAME`, password = `APP_PASSWORD` hashed) and backfills all existing watchlist/portfolio/practice rows onto it — see the `migrateToMultiUser()` migration for the full schema change (adds `user_id` to those three tables, drops the old global unique constraint on `watchlist.symbol` in favor of `(user_id, symbol)`). `db.js`'s `getWatchlist/saveWatchlist/getPortfolio/savePortfolio/getPractice/savePractice` all take a `userId` — callers in `server/index.js` pass `req.user.user_id`; `server/cron.js`'s `refreshWatchedSymbols` loops over `db.getUsers()` to refresh every user's holdings and email alerts go to each holder's own `email` column (via `GMAIL_USER`/`GMAIL_APP_PASSWORD` as the sending account), not a single hardcoded recipient.
 
+### Database (PostgreSQL, via `server/db.js`)
+`server/db.js` owns the Postgres schema (`pg` `Pool`, `initSchema()`) for auth and per-user data — see the Auth section above for the tables involved (`users`, `watchlist`, `portfolio`, `practice`, `signals`, `signal_log`, etc.).
+
+**Database Security Rule**: every new table created via `initSchema()` in `server/db.js` MUST have RLS enabled. After every `CREATE TABLE` statement, add:
+```sql
+ALTER TABLE <tablename> ENABLE ROW LEVEL SECURITY;
+```
+This applies to ALL new tables without exception.
+
 ### Server-side persistence: flat JSON files, no database
 `server/store.js` is the entire persistence layer — `read(name, default)` / `write(name, data)` / `update(name, fn, default)` against `server/data/<name>.json` (gitignored). Collections used: `screener`, `screener_meta`, `screener_upside`, `quotes`, `signals`, `signal_log`, `grades_cache`, `target_cache`, `watchlist`, `practice`, `portfolio`. There's no schema/migration mechanism — shapes are defined implicitly by whatever code reads/writes them.
 
