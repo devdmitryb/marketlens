@@ -336,7 +336,7 @@ async function refreshSymbol(sym, holdings) {
   }
   const momentum = calcMomentum(history);
   const tally    = tallyGrades(grades || []);
-  const { signal: newSignal, reason } = calcSignal({ quote, target, tally, momentum });
+  const { signal: newSignal, reason } = calcSignal({ quote, target, tally, momentum, grades });
 
   // Informational upside for storage/alerts — analyst consensus vs price (not the
   // conservative figure calcSignal decides on); kept as before for /api/signals.
