@@ -6851,6 +6851,9 @@
               if (t > entryTime || t < freshCutoff) return false;
               return /buy|outperform|overweight|accumulate/i.test(g.newGrade || '') || /upgrade/i.test(g.action || '');
             });
+            console.log('[freshGrade]', sym, 'entry', nextDay.date, 'hasFresh', hasFresh,
+              'grades in window:', grades.filter(g => { const t = new Date(g.date).getTime(); return t <= entryTime && t >= freshCutoff; }).map(g => ({date: g.date, newGrade: g.newGrade, action: g.action})),
+              'oldest/newest grade:', grades.length ? [grades[grades.length-1].date, grades[0].date] : 'none');
             if (!hasFresh) continue;
           }
           // Experimental filter: skip if price already rose > X% from its 60-day low
