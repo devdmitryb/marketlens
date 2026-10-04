@@ -1942,6 +1942,14 @@
           style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.82rem;padding:5px 8px;border-radius:7px;outline:none;width:55px" />
         <span>%</span>
       </div>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;color:var(--text-dim)">
+        <input type="checkbox" id="bt-freshgrade" style="accent-color:var(--accent2)" />
+        Fresh grade (30d)
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;color:var(--text-dim)">
+        <input type="checkbox" id="bt-notpeak" style="accent-color:var(--accent2)" />
+        Not on peak (50%)
+      </label>
       <button class="btn" onclick="runBacktest()" id="bt-run-btn">🔬 Run Backtest</button>
       <button class="btn secondary" onclick="openScanList()" id="bt-scan-btn">📡 Scan List</button>
       <span id="bt-status" style="font-size:0.78rem;color:var(--text-dim)"></span>
@@ -6450,6 +6458,8 @@
     const stopLossPct   = useStopLoss   ? parseFloat(document.getElementById('bt-stoploss-pct').value)   || 33 : null;
     const useTakeProfit = document.getElementById('bt-takeprofit')?.checked;
     const takeProfitPct = useTakeProfit ? parseFloat(document.getElementById('bt-takeprofit-pct').value) || 40 : null;
+    const requireFreshGrade = !!document.getElementById('bt-freshgrade')?.checked;
+    const maxDrawupPct  = document.getElementById('bt-notpeak')?.checked ? 50 : null;
 
     if (!serverAvailable) { alert('Server unreachable, please try again.'); return; }
 
@@ -6522,7 +6532,7 @@
           continue;
         }
 
-        const result = simulateStrategy(history, grades, target, positionSize, sym, stopLossPct, takeProfitPct);
+        const result = simulateStrategy(history, grades, target, positionSize, sym, stopLossPct, takeProfitPct, requireFreshGrade, maxDrawupPct);
         const bh     = calcBuyAndHold(history, positionSize);
 
         // Find best single trade
@@ -6716,7 +6726,9 @@
     const useTakeProfit = document.getElementById('bt-takeprofit')?.checked;
     const takeProfitPct = useTakeProfit ? parseFloat(document.getElementById('bt-takeprofit-pct').value) || 40  : null;
 
-    const result = simulateStrategy(history, grades, target, capital, sym, stopLossPct, takeProfitPct);
+    const requireFreshGrade = !!document.getElementById('bt-freshgrade')?.checked;
+    const maxDrawupPct  = document.getElementById('bt-notpeak')?.checked ? 50 : null;
+    const result = simulateStrategy(history, grades, target, capital, sym, stopLossPct, takeProfitPct, requireFreshGrade, maxDrawupPct);
       const bh     = calcBuyAndHold(history, capital);
       const xbi    = calcBuyAndHold(xbiHist, capital);
       const spy    = calcBuyAndHold(spyHist, capital);
@@ -6738,7 +6750,7 @@
     btn.disabled = false; btn.textContent = '🔬 Run Backtest';
   }
 
-  function simulateStrategy(history, grades, target, positionSize, sym, stopLossPct = null, takeProfitPct = null) {
+  function simulateStrategy(history, grades, target, positionSize, sym, stopLossPct = null, takeProfitPct = null, requireFreshGrade = false, maxDrawupPct = null) {
     const COMM = 10;
     let cumulativePnl = 0;  // track total across all trades
     let shares = 0;
@@ -6830,6 +6842,23 @@
         if (signal === 'BUY — CONFIRMED') {
           const nextDay = history[i + 1];
           if (!nextDay) continue;
+          // Experimental filter: require a Buy/Upgrade grade in the last 30 days
+          if (requireFreshGrade) {
+            const freshCutoff = new Date(nextDay.date).getTime() - 30 * 86400000;
+            const entryTime   = new Date(nextDay.date).getTime();
+            const hasFresh = grades.some(g => {
+              const t = new Date(g.date).getTime();
+              if (t > entryTime || t < freshCutoff) return false;
+              return /buy|outperform|overweight|accumulate/i.test(g.newGrade || '') || /upgrade/i.test(g.action || '');
+            });
+            if (!hasFresh) continue;
+          }
+          // Experimental filter: skip if price already rose > X% from its 60-day low
+          if (maxDrawupPct != null) {
+            const low60 = Math.min(...history.slice(Math.max(0, i - 60), i + 1).map(d => d.low));
+            const drawup = low60 > 0 ? (price - low60) / low60 * 100 : 0;
+            if (drawup > maxDrawupPct) continue;
+          }
           const buyPrice = nextDay.open || nextDay.close;
           // Fixed position size per trade (like real trading)
           shares = Math.floor((positionSize - COMM) / buyPrice);
