@@ -1942,14 +1942,6 @@
           style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:0.82rem;padding:5px 8px;border-radius:7px;outline:none;width:55px" />
         <span>%</span>
       </div>
-      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;color:var(--text-dim)">
-        <input type="checkbox" id="bt-freshgrade" style="accent-color:var(--accent2)" />
-        Fresh grade (30d)
-      </label>
-      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:0.78rem;color:var(--text-dim)">
-        <input type="checkbox" id="bt-notpeak" style="accent-color:var(--accent2)" />
-        Not on peak (50%)
-      </label>
       <button class="btn" onclick="runBacktest()" id="bt-run-btn">🔬 Run Backtest</button>
       <button class="btn secondary" onclick="openScanList()" id="bt-scan-btn">📡 Scan List</button>
       <span id="bt-status" style="font-size:0.78rem;color:var(--text-dim)"></span>
@@ -3045,6 +3037,19 @@
     return (minTarget * 0.75 - price) / price;
   }
 
+  // True/false: is there a buy-type grade (buy/outperform/overweight/accumulate, or an
+  // upgrade/initiate action) dated within the last `days` days? Returns null when no
+  // grades array was supplied (unknown), so callers without grade data aren't blocked.
+  // Keep in sync with hasFreshBuyGrade in server/signals.js.
+  function hasFreshBuyGrade(grades, days = 30) {
+    if (!Array.isArray(grades)) return null;
+    const cutoff = Date.now() - days * 86400000;
+    return grades.some(g => {
+      if (new Date(g.date).getTime() < cutoff) return false;
+      return /buy|outperform|overweight|strong buy|accumulate/i.test(g.newGrade || '') || /upgrade|init/i.test(g.action || '');
+    });
+  }
+
   function calcMomentum(history) {
     if (!history || history.length < 10) return null;
 
@@ -3081,6 +3086,7 @@
     // Peak / reversal detection — 60-day window (not 20)
     const window60    = prices.slice(-60);
     const high60      = Math.max(...window60);
+    const low60       = Math.min(...window60);
     const peakIdx     = window60.indexOf(high60);
     const daysFromPeak= window60.length - 1 - peakIdx;
     const priceAt60ago= prices[Math.max(0, n - 60)];
@@ -3111,7 +3117,7 @@
       trendUp, trendDown, aboveMa60, priceToCross, volSurge,
       drawdownFromHigh, runUp, hadBigRun,
       reversalSignal, momentumSlowing, daysFromPeak,
-      consecutiveAbove, ma60, last, prev20, high60
+      consecutiveAbove, ma60, last, prev20, high60, low60
     };
   }
 
@@ -3178,15 +3184,32 @@
 
     const { trendUp, trendDown, aboveMa60, volSurge, priceToCross, consecutiveAbove } = momentum;
 
+    // Quality gates — CONFIRMED needs a buy-type grade in the last 30 days and price
+    // not already >50% above its 60-day low; otherwise downgrade to WATCH
+    const freshGrade = hasFreshBuyGrade(data.grades);
+    const drawupPct  = momentum.low60 > 0 ? ((quote.price - momentum.low60) / momentum.low60) * 100 : 0;
+    const onPeak     = drawupPct > 50;
+    const confirmed  = trendUp && aboveMa60 && consecutiveAbove >= 3;
+    if (confirmed && (freshGrade === false || onPeak)) {
+      const why = [
+        freshGrade === false ? 'no buy-type grade in last 30d' : null,
+        onPeak ? `price +${drawupPct.toFixed(0)}% above 60d low (max 50%)` : null,
+      ].filter(Boolean).join(' + ');
+      return {
+        signal: 'BUY — WATCH',
+        reason: `Trend ↑ ${consecutiveAbove}d above MA60 but ${why} | Upside: +${upsidePct.toFixed(0)}%`
+      };
+    }
+
     // Strong entry: trend up 3+ days + above MA60 + volume confirms
-    if (trendUp && aboveMa60 && consecutiveAbove >= 3 && volSurge)
+    if (confirmed && volSurge)
       return {
         signal: 'BUY — CONFIRMED',
         reason: `Trend ↑ ${consecutiveAbove}d above MA60 (+${priceToCross.toFixed(1)}%) + volume surge | Upside: +${upsidePct.toFixed(0)}%`
       };
 
     // Good entry: trend up 3+ days + above MA60
-    if (trendUp && aboveMa60 && consecutiveAbove >= 3)
+    if (confirmed)
       return {
         signal: 'BUY — CONFIRMED',
         reason: `Trend ↑ ${consecutiveAbove}d above MA60 (+${priceToCross.toFixed(1)}%) | Upside: +${upsidePct.toFixed(0)}%`
@@ -6458,8 +6481,6 @@
     const stopLossPct   = useStopLoss   ? parseFloat(document.getElementById('bt-stoploss-pct').value)   || 33 : null;
     const useTakeProfit = document.getElementById('bt-takeprofit')?.checked;
     const takeProfitPct = useTakeProfit ? parseFloat(document.getElementById('bt-takeprofit-pct').value) || 40 : null;
-    const requireFreshGrade = !!document.getElementById('bt-freshgrade')?.checked;
-    const maxDrawupPct  = document.getElementById('bt-notpeak')?.checked ? 50 : null;
 
     if (!serverAvailable) { alert('Server unreachable, please try again.'); return; }
 
@@ -6532,7 +6553,7 @@
           continue;
         }
 
-        const result = simulateStrategy(history, grades, target, positionSize, sym, stopLossPct, takeProfitPct, requireFreshGrade, maxDrawupPct);
+        const result = simulateStrategy(history, grades, target, positionSize, sym, stopLossPct, takeProfitPct);
         const bh     = calcBuyAndHold(history, positionSize);
 
         // Find best single trade
@@ -6726,9 +6747,7 @@
     const useTakeProfit = document.getElementById('bt-takeprofit')?.checked;
     const takeProfitPct = useTakeProfit ? parseFloat(document.getElementById('bt-takeprofit-pct').value) || 40  : null;
 
-    const requireFreshGrade = !!document.getElementById('bt-freshgrade')?.checked;
-    const maxDrawupPct  = document.getElementById('bt-notpeak')?.checked ? 50 : null;
-    const result = simulateStrategy(history, grades, target, capital, sym, stopLossPct, takeProfitPct, requireFreshGrade, maxDrawupPct);
+    const result = simulateStrategy(history, grades, target, capital, sym, stopLossPct, takeProfitPct);
       const bh     = calcBuyAndHold(history, capital);
       const xbi    = calcBuyAndHold(xbiHist, capital);
       const spy    = calcBuyAndHold(spyHist, capital);
@@ -6750,7 +6769,7 @@
     btn.disabled = false; btn.textContent = '🔬 Run Backtest';
   }
 
-  function simulateStrategy(history, grades, target, positionSize, sym, stopLossPct = null, takeProfitPct = null, requireFreshGrade = false, maxDrawupPct = null) {
+  function simulateStrategy(history, grades, target, positionSize, sym, stopLossPct = null, takeProfitPct = null) {
     const COMM = 10;
     let cumulativePnl = 0;  // track total across all trades
     let shares = 0;
@@ -6842,26 +6861,6 @@
         if (signal === 'BUY — CONFIRMED') {
           const nextDay = history[i + 1];
           if (!nextDay) continue;
-          // Experimental filter: require a Buy/Upgrade grade in the last 30 days
-          if (requireFreshGrade) {
-            const freshCutoff = new Date(nextDay.date).getTime() - 30 * 86400000;
-            const entryTime   = new Date(nextDay.date).getTime();
-            const hasFresh = grades.some(g => {
-              const t = new Date(g.date).getTime();
-              if (t > entryTime || t < freshCutoff) return false;
-              return /buy|outperform|overweight|accumulate/i.test(g.newGrade || '') || /upgrade/i.test(g.action || '');
-            });
-            console.log('[freshGrade]', sym, 'entry', nextDay.date, 'hasFresh', hasFresh,
-              'grades in window:', grades.filter(g => { const t = new Date(g.date).getTime(); return t <= entryTime && t >= freshCutoff; }).map(g => ({date: g.date, newGrade: g.newGrade, action: g.action})),
-              'oldest/newest grade:', grades.length ? [grades[grades.length-1].date, grades[0].date] : 'none');
-            if (!hasFresh) continue;
-          }
-          // Experimental filter: skip if price already rose > X% from its 60-day low
-          if (maxDrawupPct != null) {
-            const low60 = Math.min(...history.slice(Math.max(0, i - 60), i + 1).map(d => d.low));
-            const drawup = low60 > 0 ? (price - low60) / low60 * 100 : 0;
-            if (drawup > maxDrawupPct) continue;
-          }
           const buyPrice = nextDay.open || nextDay.close;
           // Fixed position size per trade (like real trading)
           shares = Math.floor((positionSize - COMM) / buyPrice);
