@@ -33,6 +33,18 @@ function tallyGrades(grades, windowDays = 90) {
   return tally;
 }
 
+// True/false: is there a buy-type grade (buy/outperform/overweight/accumulate, or an
+// upgrade/initiate action) dated within the last `days` days? Returns null when no
+// grades array was supplied (unknown), so callers without grade data aren't blocked.
+function hasFreshBuyGrade(grades, days = 30) {
+  if (!Array.isArray(grades)) return null;
+  const cutoff = Date.now() - days * 86400000;
+  return grades.some(g => {
+    if (new Date(g.date).getTime() < cutoff) return false;
+    return classifyGrade(g.newGrade) === 'buy' || /upgrade|init/i.test(g.action || '');
+  });
+}
+
 function calcMomentum(history) {
   if (!history || history.length < 10) return null;
 
@@ -69,6 +81,7 @@ function calcMomentum(history) {
   // Peak / reversal detection — 60-day window (not 20)
   const window60    = prices.slice(-60);
   const high60      = Math.max(...window60);
+  const low60       = Math.min(...window60);
   const peakIdx     = window60.indexOf(high60);
   const daysFromPeak= window60.length - 1 - peakIdx;
   const priceAt60ago= prices[Math.max(0, n - 60)];
@@ -99,7 +112,7 @@ function calcMomentum(history) {
     trendUp, trendDown, aboveMa60, priceToCross, volSurge,
     drawdownFromHigh, runUp, hadBigRun,
     reversalSignal, momentumSlowing, daysFromPeak,
-    consecutiveAbove, ma60, last, prev20, high60
+    consecutiveAbove, ma60, last, prev20, high60, low60
   };
 }
 
@@ -160,15 +173,32 @@ function calcSignal(data) {
 
   const { trendUp, trendDown, aboveMa60, volSurge, priceToCross, consecutiveAbove } = momentum;
 
+  // Quality gates — CONFIRMED needs a buy-type grade in the last 30 days and price
+  // not already >50% above its 60-day low; otherwise downgrade to WATCH
+  const freshGrade = hasFreshBuyGrade(data.grades);
+  const drawupPct  = momentum.low60 > 0 ? ((quote.price - momentum.low60) / momentum.low60) * 100 : 0;
+  const onPeak     = drawupPct > 50;
+  const confirmed  = trendUp && aboveMa60 && consecutiveAbove >= 3;
+  if (confirmed && (freshGrade === false || onPeak)) {
+    const why = [
+      freshGrade === false ? 'no buy-type grade in last 30d' : null,
+      onPeak ? `price +${drawupPct.toFixed(0)}% above 60d low (max 50%)` : null,
+    ].filter(Boolean).join(' + ');
+    return {
+      signal: 'BUY — WATCH',
+      reason: `Trend ↑ ${consecutiveAbove}d above MA60 but ${why} | Upside: +${upsidePct.toFixed(0)}%`
+    };
+  }
+
   // Strong entry: trend up 3+ days + above MA60 + volume confirms
-  if (trendUp && aboveMa60 && consecutiveAbove >= 3 && volSurge)
+  if (confirmed && volSurge)
     return {
       signal: 'BUY — CONFIRMED',
       reason: `Trend ↑ ${consecutiveAbove}d above MA60 (+${priceToCross.toFixed(1)}%) + volume surge | Upside: +${upsidePct.toFixed(0)}%`
     };
 
   // Good entry: trend up 3+ days + above MA60
-  if (trendUp && aboveMa60 && consecutiveAbove >= 3)
+  if (confirmed)
     return {
       signal: 'BUY — CONFIRMED',
       reason: `Trend ↑ ${consecutiveAbove}d above MA60 (+${priceToCross.toFixed(1)}%) | Upside: +${upsidePct.toFixed(0)}%`
@@ -270,6 +300,6 @@ function calcAnalystAccuracy(grades, history, currentPrice, windowDays = 90) {
 }
 
 module.exports = {
-  calcConservativeUpside, tallyGrades, calcMomentum, calcSignal,
+  calcConservativeUpside, tallyGrades, hasFreshBuyGrade, calcMomentum, calcSignal,
   calcVolumeSignal, calcCombinedSignal, calcAnalystAccuracy,
 };
